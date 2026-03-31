@@ -5,6 +5,8 @@ WassersteinDistance  — numerical columns  (1st Wasserstein / Earth Mover's Dis
 TotalVariationDistance — categorical columns
 """
 
+#TODO: Make sure the wasserstein and tvd are implemented well
+
 from __future__ import annotations
 
 import warnings
