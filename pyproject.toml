@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stdg-eval"
+version = "0.1.0"
+description = "A modular evaluation library for tabular synthetic data generation"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "annabelz" }]
+keywords = ["synthetic data", "evaluation", "fidelity", "privacy", "utility"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.11",
+    "scikit-learn>=1.3",
+    "plotly>=5.18",
+    "streamlit>=1.30",
+    "pyyaml>=6.0",
+    "pyarrow>=14.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "pytest-cov", "black", "ruff"]
+
+[project.scripts]
+stdg-eval = "stdg_eval.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["stdg_eval*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"

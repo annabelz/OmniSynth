@@ -1,0 +1,13 @@
+real_data: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/real.csv
+synthetic_datasets:
+- name: synth1
+  path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/synth1.csv
+- name: synth2
+  path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/synth2.csv
+column_types:
+  age: numerical
+  bmi: numerical
+  sbp: numerical
+  sex: categorical
+  diagnosis: categorical
+  smoker: categorical

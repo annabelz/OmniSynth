@@ -1,0 +1,113 @@
+"""
+CLI entry point for stdg-eval.
+
+Commands
+--------
+stdg-eval dashboard [--config PATH] [--port PORT]
+    Launch the Streamlit interactive dashboard.
+
+stdg-eval evaluate --real PATH --synth PATH [PATH ...] [--output PATH]
+    Run evaluation headlessly and write results to a JSON file.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import warnings
+from pathlib import Path
+
+
+def _cmd_dashboard(args):
+    import subprocess
+
+    dashboard_py = Path(__file__).parent.parent / "run_dashboard.py"
+    cmd = [sys.executable, "-m", "streamlit", "run", str(dashboard_py),
+           "--server.port", str(args.port)]
+    if args.config:
+        # Pass config path via environment variable (picked up by dashboard.py)
+        env = os.environ.copy()
+        env["STDG_EVAL_CONFIG"] = str(args.config)
+        subprocess.run(cmd, env=env)
+    else:
+        subprocess.run(cmd)
+
+
+def _cmd_evaluate(args):
+    import pandas as pd
+    from stdg_eval.evaluation.fidelity import evaluate_fidelity
+    from stdg_eval.evaluation.missingness import evaluate_missingness
+    from stdg_eval.evaluation.scoring import (
+        compute_fidelity_score,
+        compute_missingness_score,
+        compute_composite_score,
+    )
+
+    real = pd.read_csv(args.real)
+    results = {}
+
+    for synth_path in args.synth:
+        name = Path(synth_path).stem
+        synth = pd.read_csv(synth_path)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            fid = evaluate_fidelity(real, synth)
+            miss = evaluate_missingness(real, synth)
+
+        f_scores = compute_fidelity_score(fid)
+        m_scores = compute_missingness_score(miss)
+        comp = compute_composite_score(f_scores, m_scores)
+
+        results[name] = {
+            "fidelity_score": f_scores["overall"],
+            "missingness_score": m_scores["overall"],
+            "composite_score": comp["composite"],
+            "group_scores": {
+                "univariate": f_scores.get("univariate"),
+                "bivariate": f_scores.get("bivariate"),
+                "multivariate": f_scores.get("multivariate"),
+            },
+        }
+        print(f"[{name}]  fidelity={f_scores['overall']:.4f}  "
+              f"missingness={m_scores['overall']:.4f}  "
+              f"composite={comp['composite']:.4f}")
+
+    if args.output:
+        out = Path(args.output)
+        out.write_text(json.dumps(results, indent=2))
+        print(f"\nResults saved to {out}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="stdg-eval",
+        description="Evaluate tabular synthetic data fidelity and missingness.",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    # dashboard sub-command
+    dash_p = sub.add_parser("dashboard", help="Launch the interactive dashboard.")
+    dash_p.add_argument("--config", type=Path, default=None,
+                        help="Path to a YAML or .txt config file.")
+    dash_p.add_argument("--port", type=int, default=8501,
+                        help="Port for the Streamlit server (default: 8501).")
+
+    # evaluate sub-command
+    eval_p = sub.add_parser("evaluate", help="Headless evaluation — outputs JSON scores.")
+    eval_p.add_argument("--real", type=Path, required=True, help="Path to real dataset CSV.")
+    eval_p.add_argument("--synth", type=Path, nargs="+", required=True,
+                        help="Path(s) to synthetic dataset CSV(s).")
+    eval_p.add_argument("--output", type=Path, default=None,
+                        help="Where to write JSON results (optional).")
+
+    args = parser.parse_args()
+
+    if args.command == "dashboard":
+        _cmd_dashboard(args)
+    elif args.command == "evaluate":
+        _cmd_evaluate(args)
+    else:
+        parser.print_help()
