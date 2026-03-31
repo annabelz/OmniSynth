@@ -355,10 +355,10 @@ class MyNewMetric(BaseMetric):
 
 ## TODO
 
+- [ ] **Unit tests** — `pytest` test suite covering all metrics and scoring functions (need to double-check the implementation of all metrics).
 - [ ] **Pairwise Correlation Difference** — unified mixed-type correlation measure (Cramér's V for categorical, point-biserial for mixed, Spearman for numerical).
 - [ ] **Utility metrics** — downstream task performance (e.g., train-on-synthetic/test-on-real AUROC for a specified target variable).
 - [ ] **Privacy metrics** — membership inference attack success rate, nearest-neighbour distance ratios, attribute disclosure risk.
 - [ ] **Composite score design** — finalise the weighting scheme for the 4-axis composite score once utility and privacy are implemented.
 - [ ] **Per-dataset PDF report export** — generate a self-contained HTML/PDF report for a single synthetic dataset.
 - [ ] **Confidence intervals** — bootstrap CIs for metric scores.
-- [ ] **Unit tests** — `pytest` test suite covering all metrics and scoring functions.
