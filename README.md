@@ -125,11 +125,45 @@ results = evaluate_fidelity(real, synth, col_types=col_types)
 
 ### Full example
 
-See [`examples/example_workflow.py`](examples/example_workflow.py) for a self-contained script that creates toy datasets, runs all metrics, and prints ranked scores.
+[`examples/example_workflow.py`](examples/example_workflow.py) is a self-contained script that demonstrates the entire programmatic API end-to-end. It:
+
+1. Generates two toy clinical datasets (`synth1` — high fidelity, `synth2` — lower fidelity) and saves them as CSVs to `examples/data/`.
+2. Writes a ready-to-use YAML config to `examples/example_config.yaml` with the absolute paths to those files.
+3. Runs fidelity and missingness evaluation on both synthetic datasets.
+4. Computes weighted scores with custom weights and prints a ranked comparison.
 
 ```bash
 python examples/example_workflow.py
 ```
+
+Expected output (values will vary slightly):
+
+```
+Saved datasets to  examples/data/
+Saved config to    examples/example_config.yaml
+Launch dashboard:  streamlit run run_dashboard.py -- --config examples/example_config.yaml
+
+Detected column types:
+  age: numerical
+  bmi: numerical
+  ...
+
+[univariate] Wasserstein Distance: score = 0.9731
+[univariate] Total Variation Distance: score = 0.9854
+...
+
+  synth1:
+    Fidelity score   : 0.9612
+    Missingness score: 0.9480
+    Composite score  : 0.9546
+
+  synth2:
+    Fidelity score   : 0.7803
+    Missingness score: 0.7214
+    Composite score  : 0.7509
+```
+
+After running the script, load the generated config directly into the dashboard (see below).
 
 ---
 
@@ -143,9 +177,19 @@ streamlit run run_dashboard.py
 
 Then open `http://localhost:8501` in your browser. Use the sidebar to upload your CSV files directly.
 
-### Launch with a config file
+### Launch with the example config
 
-Create a YAML config (see [`configs/example_config.yaml`](configs/example_config.yaml)):
+After running `examples/example_workflow.py`, a config file is automatically generated at `examples/example_config.yaml` with absolute paths to the toy datasets. Launch the dashboard pointed at it:
+
+```bash
+streamlit run run_dashboard.py -- --config examples/example_config.yaml
+```
+
+The datasets load automatically — click **▶ Run evaluation** in the sidebar to start.
+
+### Launch with your own config file
+
+Create a YAML config:
 
 ```yaml
 real_data: data/real.csv
@@ -161,7 +205,7 @@ column_types:           # optional overrides
   age: numerical
 ```
 
-Or a plain-text config:
+Or a plain-text config (one path per line, `#` for comments):
 
 ```text
 # lines starting with # are ignored
@@ -174,9 +218,7 @@ data/synth3.csv
 Then launch:
 
 ```bash
-stdg-eval dashboard --config configs/my_config.yaml
-# or
-streamlit run run_dashboard.py
+streamlit run run_dashboard.py -- --config configs/my_config.yaml
 ```
 
 ### Dashboard workflow (example with 3 synthetic datasets)

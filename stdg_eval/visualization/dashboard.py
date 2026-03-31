@@ -38,6 +38,11 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from stdg_eval.config import (
+    DEFAULT_COMPOSITE_WEIGHTS,
+    DEFAULT_FIDELITY_WEIGHTS,
+    DEFAULT_MISSINGNESS_WEIGHTS,
+)
 from stdg_eval.evaluation.fidelity import evaluate_fidelity
 from stdg_eval.evaluation.missingness import evaluate_missingness
 from stdg_eval.evaluation.scoring import (
@@ -191,10 +196,23 @@ def _sidebar():
     st.sidebar.subheader("3 · Evaluate")
 
     with st.sidebar.expander("Metric options", expanded=False):
-        run_uni = st.checkbox("Univariate", value=True)
-        run_bi = st.checkbox("Bivariate", value=True)
-        run_multi = st.checkbox("Multivariate", value=True)
-        run_miss = st.checkbox("Missingness", value=True)
+        run_uni = st.checkbox("Univariate", value=True, key="run_uni")
+        run_wd = st.checkbox("↳ Wasserstein Distance", value=True, key="run_wd", disabled=not run_uni)
+        run_tvd = st.checkbox("↳ Total Variation Distance", value=True, key="run_tvd", disabled=not run_uni)
+
+        run_bi = st.checkbox("Bivariate", value=True, key="run_bi")
+        run_spearman = st.checkbox("↳ Spearman Correlation", value=True, key="run_spearman", disabled=not run_bi)
+        run_contingency = st.checkbox("↳ Contingency Matrix", value=True, key="run_contingency", disabled=not run_bi)
+
+        run_multi = st.checkbox("Multivariate", value=True, key="run_multi")
+        run_cc = st.checkbox("↳ Cross-Classification", value=True, key="run_cc", disabled=not run_multi)
+        run_pmse = st.checkbox("↳ Propensity MSE", value=True, key="run_pmse", disabled=not run_multi)
+
+        run_miss = st.checkbox("Missingness", value=True, key="run_miss")
+        run_miss_rate = st.checkbox("↳ Rate", value=True, key="run_miss_rate", disabled=not run_miss)
+        run_miss_set = st.checkbox("↳ Pattern Distribution", value=True, key="run_miss_set", disabled=not run_miss)
+        run_miss_auroc = st.checkbox("↳ Classifier AUROC", value=True, key="run_miss_auroc", disabled=not run_miss)
+        run_miss_dep = st.checkbox("↳ Dependency Structure", value=True, key="run_miss_dep", disabled=not run_miss)
 
     run_btn = st.sidebar.button(
         "▶ Run evaluation",
@@ -207,10 +225,22 @@ def _sidebar():
     )
 
     if run_btn:
-        _run_evaluation(run_uni, run_bi, run_multi, run_miss)
+        _run_evaluation(
+            run_uni, run_bi, run_multi, run_miss,
+            run_wd, run_tvd,
+            run_spearman, run_contingency,
+            run_cc, run_pmse,
+            run_miss_rate, run_miss_set, run_miss_auroc, run_miss_dep,
+        )
 
 
-def _run_evaluation(run_uni, run_bi, run_multi, run_miss):
+def _run_evaluation(
+    run_uni, run_bi, run_multi, run_miss,
+    run_wd=True, run_tvd=True,
+    run_spearman=True, run_contingency=True,
+    run_cc=True, run_pmse=True,
+    run_miss_rate=True, run_miss_set=True, run_miss_auroc=True, run_miss_dep=True,
+):
     real = st.session_state["real_df"]
     synths = st.session_state["synth_dfs"]
     col_types = st.session_state["col_types"]
@@ -226,15 +256,42 @@ def _run_evaluation(run_uni, run_bi, run_multi, run_miss):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             if run_uni or run_bi or run_multi:
-                fidelity_results[name] = evaluate_fidelity(
+                res = evaluate_fidelity(
                     real, synth, col_types=col_types,
                     run_univariate=run_uni,
                     run_bivariate=run_bi,
                     run_multivariate=run_multi,
                 )
+                # Post-filter individual sub-metrics the user deselected
+                if "univariate" in res:
+                    if not run_wd:
+                        res["univariate"].pop("wasserstein", None)
+                    if not run_tvd:
+                        res["univariate"].pop("tvd", None)
+                    if not res["univariate"]:
+                        del res["univariate"]
+                if "bivariate" in res:
+                    if not run_spearman:
+                        res["bivariate"].pop("spearman", None)
+                    if not run_contingency:
+                        res["bivariate"].pop("contingency", None)
+                    if not res["bivariate"]:
+                        del res["bivariate"]
+                if "multivariate" in res:
+                    if not run_cc:
+                        res["multivariate"].pop("cross_classification", None)
+                    if not run_pmse:
+                        res["multivariate"].pop("propensity_mse", None)
+                    if not res["multivariate"]:
+                        del res["multivariate"]
+                fidelity_results[name] = res
             if run_miss:
                 missingness_results[name] = evaluate_missingness(
-                    real, synth, col_types=col_types
+                    real, synth, col_types=col_types,
+                    run_rate=run_miss_rate,
+                    run_set_distribution=run_miss_set,
+                    run_classifier_auroc=run_miss_auroc,
+                    run_dependency_structure=run_miss_dep,
                 )
 
     progress.progress(1.0, text="Done.")
@@ -258,6 +315,123 @@ def _score_badge(label: str, score: float):
         f'<span class="score-badge" style="color:{color}">{score:.3f}</span></div>',
         unsafe_allow_html=True,
     )
+
+
+# ===========================================================================
+# Shared weight controls (rendered once, before tabs)
+# ===========================================================================
+
+def _weight_controls():
+    """Render weight sliders in an expander. Called once before the tab layout."""
+    ss = st.session_state
+    run_uni = ss.get("run_uni", True)
+    run_bi = ss.get("run_bi", True)
+    run_multi = ss.get("run_multi", True)
+    run_miss = ss.get("run_miss", True)
+
+    # A fidelity group only contributes if it has at least one sub-metric enabled
+    uni_active = run_uni and (ss.get("run_wd", True) or ss.get("run_tvd", True))
+    bi_active = run_bi and (ss.get("run_spearman", True) or ss.get("run_contingency", True))
+    multi_active = run_multi and (ss.get("run_cc", True) or ss.get("run_pmse", True))
+    has_fidelity = uni_active or bi_active or multi_active
+
+    miss_rate_active = run_miss and ss.get("run_miss_rate", True)
+    miss_set_active = run_miss and ss.get("run_miss_set", True)
+    miss_auroc_active = run_miss and ss.get("run_miss_auroc", True)
+    miss_dep_active = run_miss and ss.get("run_miss_dep", True)
+    has_missingness = miss_rate_active or miss_set_active or miss_auroc_active or miss_dep_active
+
+    with st.expander("Weighting scheme", expanded=False):
+        st.caption(
+            "Adjust the weights for each metric group and evaluation axis. "
+            "Weights are automatically normalised to sum to 1."
+        )
+        weight_cols = st.columns(2)
+        with weight_cols[0]:
+            st.markdown("**Fidelity weights**")
+            if has_fidelity:
+                if uni_active:
+                    st.slider("Univariate", 0.0, 1.0, DEFAULT_FIDELITY_WEIGHTS[0], 0.01, key="w_uni")
+                    st.caption(_fidelity_sub_label("run_wd", "WD", "run_tvd", "TVD"))
+                if bi_active:
+                    st.slider("Bivariate", 0.0, 1.0, DEFAULT_FIDELITY_WEIGHTS[1], 0.01, key="w_bi")
+                    st.caption(_fidelity_sub_label("run_spearman", "Spearman", "run_contingency", "Contingency"))
+                if multi_active:
+                    st.slider("Multivariate", 0.0, 1.0, DEFAULT_FIDELITY_WEIGHTS[2], 0.01, key="w_multi")
+                    st.caption(_fidelity_sub_label("run_cc", "Cross-class", "run_pmse", "pMSE"))
+            else:
+                st.caption("No fidelity metrics selected.")
+        with weight_cols[1]:
+            st.markdown("**Missingness weights**")
+            if has_missingness:
+                if miss_rate_active:
+                    st.slider("Rate", 0.0, 1.0, DEFAULT_MISSINGNESS_WEIGHTS[0], 0.01, key="w_rate")
+                if miss_set_active:
+                    st.slider("Pattern distribution", 0.0, 1.0, DEFAULT_MISSINGNESS_WEIGHTS[1], 0.01, key="w_set")
+                if miss_auroc_active:
+                    st.slider("Classifier AUROC", 0.0, 1.0, DEFAULT_MISSINGNESS_WEIGHTS[2], 0.01, key="w_auroc")
+                if miss_dep_active:
+                    st.slider("Dependency structure", 0.0, 1.0, DEFAULT_MISSINGNESS_WEIGHTS[3], 0.01, key="w_dep")
+            else:
+                st.caption("No missingness metrics selected.")
+        st.markdown("**Composite axis weights**")
+        comp_cols = st.columns(4)
+        with comp_cols[0]:
+            if has_fidelity:
+                st.slider("Fidelity axis", 0.0, 1.0, DEFAULT_COMPOSITE_WEIGHTS[0], 0.01, key="w_fid")
+            else:
+                st.metric("Fidelity axis", "N/A")
+        with comp_cols[1]:
+            if has_missingness:
+                st.slider("Missingness axis", 0.0, 1.0, DEFAULT_COMPOSITE_WEIGHTS[1], 0.01, key="w_miss")
+            else:
+                st.metric("Missingness axis", "N/A")
+        with comp_cols[2]:
+            st.metric("Utility axis", "TODO", help="Utility metrics not yet implemented.")
+        with comp_cols[3]:
+            st.metric("Privacy axis", "TODO", help="Privacy metrics not yet implemented.")
+
+
+def _fidelity_sub_label(key_a: str, label_a: str, key_b: str, label_b: str) -> str:
+    """Return a caption listing which sub-metrics are active within a fidelity group."""
+    ss = st.session_state
+    active = [l for k, l in [(key_a, label_a), (key_b, label_b)] if ss.get(k, True)]
+    return "Includes: " + " + ".join(active) if active else ""
+
+
+def _get_weights() -> tuple:
+    """Read the current weight values from session state for enabled metrics only."""
+    ss = st.session_state
+    run_uni = ss.get("run_uni", True)
+    run_bi = ss.get("run_bi", True)
+    run_multi = ss.get("run_multi", True)
+    run_miss = ss.get("run_miss", True)
+
+    uni_active = run_uni and (ss.get("run_wd", True) or ss.get("run_tvd", True))
+    bi_active = run_bi and (ss.get("run_spearman", True) or ss.get("run_contingency", True))
+    multi_active = run_multi and (ss.get("run_cc", True) or ss.get("run_pmse", True))
+
+    miss_rate_active = run_miss and ss.get("run_miss_rate", True)
+    miss_set_active = run_miss and ss.get("run_miss_set", True)
+    miss_auroc_active = run_miss and ss.get("run_miss_auroc", True)
+    miss_dep_active = run_miss and ss.get("run_miss_dep", True)
+
+    fidelity_weights = [
+        ss.get("w_uni", DEFAULT_FIDELITY_WEIGHTS[0]) if uni_active else 0.0,
+        ss.get("w_bi", DEFAULT_FIDELITY_WEIGHTS[1]) if bi_active else 0.0,
+        ss.get("w_multi", DEFAULT_FIDELITY_WEIGHTS[2]) if multi_active else 0.0,
+    ]
+    miss_weights = [
+        ss.get("w_rate", DEFAULT_MISSINGNESS_WEIGHTS[0]) if miss_rate_active else 0.0,
+        ss.get("w_set", DEFAULT_MISSINGNESS_WEIGHTS[1]) if miss_set_active else 0.0,
+        ss.get("w_auroc", DEFAULT_MISSINGNESS_WEIGHTS[2]) if miss_auroc_active else 0.0,
+        ss.get("w_dep", DEFAULT_MISSINGNESS_WEIGHTS[3]) if miss_dep_active else 0.0,
+    ]
+    composite_weights = [
+        ss.get("w_fid", DEFAULT_COMPOSITE_WEIGHTS[0]) if (uni_active or bi_active or multi_active) else 0.0,
+        ss.get("w_miss", DEFAULT_COMPOSITE_WEIGHTS[1]) if (miss_rate_active or miss_set_active or miss_auroc_active or miss_dep_active) else 0.0,
+    ]
+    return fidelity_weights, miss_weights, composite_weights
 
 
 # ===========================================================================
@@ -292,8 +466,10 @@ def _tab_individual():
     st.subheader("Scores")
     score_cols = st.columns(3)
 
-    f_scores = compute_fidelity_score(fid_res) if fid_res else {}
-    m_scores = compute_missingness_score(miss_res) if miss_res else {}
+    fidelity_weights, miss_weights, composite_weights = _get_weights()
+
+    f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights) if fid_res else {}
+    m_scores = compute_missingness_score(miss_res, weights=miss_weights) if miss_res else {}
 
     with score_cols[0]:
         if f_scores:
@@ -303,7 +479,7 @@ def _tab_individual():
             _score_badge("Missingness", m_scores["overall"])
     with score_cols[2]:
         if f_scores and m_scores:
-            comp = compute_composite_score(f_scores, m_scores)
+            comp = compute_composite_score(f_scores, m_scores, weights=composite_weights)
             _score_badge("Composite", comp["composite"])
 
     st.divider()
@@ -514,43 +690,7 @@ def _tab_benchmarking():
         st.info("Run evaluation first (sidebar → **▶ Run evaluation**).")
         return
 
-    # ------------------------------------------------------------------
-    # Weight configuration
-    # ------------------------------------------------------------------
-    st.subheader("Weighting scheme")
-    st.caption(
-        "Adjust the weights for each metric group and evaluation axis. "
-        "Weights are automatically normalised to sum to 1."
-    )
-
-    weight_cols = st.columns(2)
-
-    with weight_cols[0]:
-        st.markdown("**Fidelity weights**")
-        w_uni = st.slider("Univariate (WD + TVD)", 0.0, 1.0, 0.34, 0.01, key="w_uni")
-        w_bi = st.slider("Bivariate (Spearman + Contingency)", 0.0, 1.0, 0.33, 0.01, key="w_bi")
-        w_multi = st.slider("Multivariate (Cross-class + pMSE)", 0.0, 1.0, 0.33, 0.01, key="w_multi")
-        fidelity_weights = [w_uni, w_bi, w_multi]
-
-    with weight_cols[1]:
-        st.markdown("**Missingness weights**")
-        w_rate = st.slider("Missingness rate", 0.0, 1.0, 0.25, 0.01, key="w_rate")
-        w_set = st.slider("Pattern distribution", 0.0, 1.0, 0.25, 0.01, key="w_set")
-        w_auroc = st.slider("Classifier AUROC", 0.0, 1.0, 0.25, 0.01, key="w_auroc")
-        w_dep = st.slider("Dependency structure", 0.0, 1.0, 0.25, 0.01, key="w_dep")
-        miss_weights = [w_rate, w_set, w_auroc, w_dep]
-
-    st.markdown("**Composite axis weights**")
-    comp_cols = st.columns(4)
-    with comp_cols[0]:
-        w_fid = st.slider("Fidelity axis", 0.0, 1.0, 0.5, 0.01, key="w_fid")
-    with comp_cols[1]:
-        w_miss = st.slider("Missingness axis", 0.0, 1.0, 0.5, 0.01, key="w_miss")
-    with comp_cols[2]:
-        st.metric("Utility axis", "TODO", help="Utility metrics not yet implemented.")
-    with comp_cols[3]:
-        st.metric("Privacy axis", "TODO", help="Privacy metrics not yet implemented.")
-    composite_weights = [w_fid, w_miss]
+    fidelity_weights, miss_weights, composite_weights = _get_weights()
 
     st.divider()
 
@@ -688,6 +828,8 @@ def run_dashboard():
 | **Privacy** | 🔜 TODO | Disclosure risk, membership inference |
         """)
         return
+
+    _weight_controls()
 
     tab1, tab2 = st.tabs(["📊 Individual Report", "🏆 Benchmarking Report"])
     with tab1:
