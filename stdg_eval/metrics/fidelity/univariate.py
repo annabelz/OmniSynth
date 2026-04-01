@@ -111,8 +111,9 @@ class HellingerDistance(BaseMetric):
         H(P, Q) = (1/√2) · √(Σ (√p_i − √q_i)²)  ∈ [0, 1]
 
     For **numerical** columns, both real and synthetic values are binned into a
-    shared histogram over the combined value range, and the same formula is
-    applied to the resulting discrete distributions.
+    shared histogram over the combined value range using Scott's (1979) reference
+    rule to determine the number of bins, and the same formula is applied to the
+    resulting discrete distributions.
 
     Per-column score = 1 − H, so 1 = identical distributions, 0 = maximally
     divergent.  The overall score is the mean across all columns.
@@ -121,12 +122,23 @@ class HellingerDistance(BaseMetric):
     name = "Hellinger Distance"
     description = (
         "Hellinger distance between real and synthetic distributions for each column "
-        "(histogram-based for numerical, frequency-based for categorical)."
+        "(Scott's-rule histogram for numerical, frequency-based for categorical)."
     )
     axis = "fidelity"
 
-    def __init__(self, n_bins: int = 50) -> None:
-        self.n_bins = n_bins
+    @staticmethod
+    def _scott_n_bins(r: np.ndarray, lo: float, hi: float) -> int:
+        """
+        Compute number of bins using Scott's (1979) reference rule:
+            h = 3.5 · σ_real · n^(-1/3)
+            n_bins = ceil((hi − lo) / h)
+        Falls back to 1 if σ = 0 or the rule yields fewer than 1 bin.
+        """
+        std = float(np.std(r, ddof=1)) if len(r) > 1 else 0.0
+        if std == 0.0:
+            return 1
+        h = 3.5 * std * (len(r) ** (-1 / 3))
+        return max(1, int(np.ceil((hi - lo) / h)))
 
     def _hellinger(self, p: np.ndarray, q: np.ndarray) -> float:
         """Compute Hellinger distance between two normalised probability vectors."""
@@ -160,7 +172,8 @@ class HellingerDistance(BaseMetric):
                 column_scores[col] = 1.0
                 continue
 
-            bins = np.linspace(lo, hi, self.n_bins + 1)
+            n_bins = self._scott_n_bins(r, lo, hi)
+            bins = np.linspace(lo, hi, n_bins + 1)
             r_hist, _ = np.histogram(r, bins=bins)
             s_hist, _ = np.histogram(s, bins=bins)
             r_prob = r_hist / r_hist.sum()
