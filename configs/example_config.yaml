@@ -23,3 +23,21 @@ synthetic_datasets:
 #   sex: categorical
 #   bmi: numerical
 #   diagnosis: categorical
+
+# Optional: enable or disable individual metrics (all default to true if omitted)
+# metrics:
+#   # Univariate
+#   wasserstein: true
+#   tvd: true
+#   hellinger: true
+#   # Bivariate
+#   spearman: true
+#   contingency: true
+#   # Multivariate
+#   cross_classification: true
+#   propensity_mse: true
+#   # Missingness
+#   rate: true
+#   set_distribution: true
+#   classifier_auroc: true
+#   dependency_structure: true

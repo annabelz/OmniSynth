@@ -54,15 +54,28 @@ DEFAULT_COMPOSITE_WEIGHTS: List[float] = [0.5, 0.5]
 class FidelityConfig:
     """Knobs for individual fidelity metrics."""
 
-    # Univariate
+    # Univariate — metric enable flags
+    run_wasserstein: bool = True
+    run_tvd: bool = True
+    run_hellinger: bool = True
+
+    # Univariate — metric settings
     wasserstein_n_bins: int = 100  # used only for plotting; SciPy computes exact WD
     tvd_normalize: bool = True     # normalise frequency distributions before TVD
 
-    # Bivariate
+    # Bivariate — metric enable flags
+    run_spearman: bool = True
+    run_contingency: bool = True
+
+    # Bivariate — metric settings
     spearman_method: Literal["spearman", "pearson"] = "spearman"
     contingency_max_categories: int = 30  # skip cols with more unique values
 
-    # Multivariate
+    # Multivariate — metric enable flags
+    run_cross_classification: bool = True
+    run_propensity_mse: bool = True
+
+    # Multivariate — metric settings
     cross_classification_n_estimators: int = 100
     cross_classification_cv_folds: int = 5
     propensity_mse_model: Literal["logistic", "rf"] = "logistic"
@@ -74,6 +87,13 @@ class FidelityConfig:
 class MissingnessConfig:
     """Knobs for individual missingness metrics."""
 
+    # Metric enable flags
+    run_rate: bool = True
+    run_set_distribution: bool = True
+    run_classifier_auroc: bool = True
+    run_dependency_structure: bool = True
+
+    # Metric settings
     classifier_model: Literal["logistic", "rf"] = "logistic"
     classifier_max_iter: int = 500
     classifier_n_estimators: int = 100  # only used when model == "rf"

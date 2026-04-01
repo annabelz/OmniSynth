@@ -44,18 +44,30 @@ def _cmd_evaluate(args):
         compute_missingness_score,
         compute_composite_score,
     )
+    from stdg_eval.utils.data_utils import load_config
 
-    real = pd.read_csv(args.real)
+    if args.config:
+        cfg = load_config(args.config)
+        real = pd.read_csv(cfg["real_data"])
+        synth_entries = [(e["name"], e["path"]) for e in cfg.get("synthetic_datasets", [])]
+        col_types = cfg.get("column_types") or None
+    else:
+        if not args.real or not args.synth:
+            print("Error: provide either --config or both --real and --synth.", file=sys.stderr)
+            sys.exit(1)
+        real = pd.read_csv(args.real)
+        synth_entries = [(Path(p).stem, p) for p in args.synth]
+        col_types = None
+
     results = {}
 
-    for synth_path in args.synth:
-        name = Path(synth_path).stem
+    for name, synth_path in synth_entries:
         synth = pd.read_csv(synth_path)
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            fid = evaluate_fidelity(real, synth)
-            miss = evaluate_missingness(real, synth)
+            fid = evaluate_fidelity(real, synth, col_types=col_types)
+            miss = evaluate_missingness(real, synth, col_types=col_types)
 
         f_scores = compute_fidelity_score(fid)
         m_scores = compute_missingness_score(miss)
@@ -97,8 +109,10 @@ def main():
 
     # evaluate sub-command
     eval_p = sub.add_parser("evaluate", help="Headless evaluation — outputs JSON scores.")
-    eval_p.add_argument("--real", type=Path, required=True, help="Path to real dataset CSV.")
-    eval_p.add_argument("--synth", type=Path, nargs="+", required=True,
+    eval_p.add_argument("--config", type=Path, default=None,
+                        help="Path to a YAML config file (real_data, synthetic_datasets, column_types).")
+    eval_p.add_argument("--real", type=Path, default=None, help="Path to real dataset CSV.")
+    eval_p.add_argument("--synth", type=Path, nargs="+", default=None,
                         help="Path(s) to synthetic dataset CSV(s).")
     eval_p.add_argument("--output", type=Path, default=None,
                         help="Where to write JSON results (optional).")

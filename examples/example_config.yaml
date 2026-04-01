@@ -11,3 +11,19 @@ column_types:
   sex: categorical
   diagnosis: categorical
   smoker: categorical
+metrics:
+  # Univariate
+  wasserstein: false
+  tvd: false
+  hellinger: true
+  # Bivariate
+  spearman: true
+  contingency: true
+  # Multivariate
+  cross_classification: true
+  propensity_mse: true
+  # Missingness
+  rate: true
+  set_distribution: true
+  classifier_auroc: true
+  dependency_structure: true

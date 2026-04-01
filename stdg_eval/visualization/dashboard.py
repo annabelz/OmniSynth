@@ -50,7 +50,7 @@ from stdg_eval.evaluation.scoring import (
     compute_fidelity_score,
     compute_missingness_score,
 )
-from stdg_eval.utils.data_utils import detect_column_types, load_dataset, load_config, validate_column_types
+from stdg_eval.utils.data_utils import detect_column_types, load_dataset, load_config, validate_column_types, eval_config_from_dict
 from stdg_eval.visualization import plots as P
 
 
@@ -154,6 +154,23 @@ def _sidebar():
                 # Column type overrides from config
                 if "column_types" in cfg:
                     st.session_state["col_types"] = cfg["column_types"]
+                # Metric enable flags from config — set as session state defaults
+                # so that the sidebar checkboxes reflect them on next render
+                if "metrics" in cfg:
+                    eval_cfg = eval_config_from_dict(cfg)
+                    fc = eval_cfg.fidelity
+                    mc = eval_cfg.missingness
+                    st.session_state["run_wd"] = fc.run_wasserstein
+                    st.session_state["run_tvd"] = fc.run_tvd
+                    st.session_state["run_hd"] = fc.run_hellinger
+                    st.session_state["run_spearman"] = fc.run_spearman
+                    st.session_state["run_contingency"] = fc.run_contingency
+                    st.session_state["run_cc"] = fc.run_cross_classification
+                    st.session_state["run_pmse"] = fc.run_propensity_mse
+                    st.session_state["run_miss_rate"] = mc.run_rate
+                    st.session_state["run_miss_set"] = mc.run_set_distribution
+                    st.session_state["run_miss_auroc"] = mc.run_classifier_auroc
+                    st.session_state["run_miss_dep"] = mc.run_dependency_structure
             except Exception as e:
                 st.sidebar.error(f"Failed to load config: {e}")
 
@@ -199,6 +216,7 @@ def _sidebar():
         run_uni = st.checkbox("Univariate", value=True, key="run_uni")
         run_wd = st.checkbox("↳ Wasserstein Distance", value=True, key="run_wd", disabled=not run_uni)
         run_tvd = st.checkbox("↳ Total Variation Distance", value=True, key="run_tvd", disabled=not run_uni)
+        run_hd = st.checkbox("↳ Hellinger Distance", value=True, key="run_hd", disabled=not run_uni)
 
         run_bi = st.checkbox("Bivariate", value=True, key="run_bi")
         run_spearman = st.checkbox("↳ Spearman Correlation", value=True, key="run_spearman", disabled=not run_bi)
@@ -227,7 +245,7 @@ def _sidebar():
     if run_btn:
         _run_evaluation(
             run_uni, run_bi, run_multi, run_miss,
-            run_wd, run_tvd,
+            run_wd, run_tvd, run_hd,
             run_spearman, run_contingency,
             run_cc, run_pmse,
             run_miss_rate, run_miss_set, run_miss_auroc, run_miss_dep,
@@ -236,7 +254,7 @@ def _sidebar():
 
 def _run_evaluation(
     run_uni, run_bi, run_multi, run_miss,
-    run_wd=True, run_tvd=True,
+    run_wd=True, run_tvd=True, run_hd=True,
     run_spearman=True, run_contingency=True,
     run_cc=True, run_pmse=True,
     run_miss_rate=True, run_miss_set=True, run_miss_auroc=True, run_miss_dep=True,
@@ -277,6 +295,8 @@ def _run_evaluation(
                         res["univariate"].pop("wasserstein", None)
                     if not run_tvd:
                         res["univariate"].pop("tvd", None)
+                    if not run_hd:
+                        res["univariate"].pop("hellinger", None)
                     if not res["univariate"]:
                         del res["univariate"]
                 if "bivariate" in res:
@@ -339,7 +359,7 @@ def _weight_controls():
     run_miss = ss.get("run_miss", True)
 
     # A fidelity group only contributes if it has at least one sub-metric enabled
-    uni_active = run_uni and (ss.get("run_wd", True) or ss.get("run_tvd", True))
+    uni_active = run_uni and (ss.get("run_wd", True) or ss.get("run_tvd", True) or ss.get("run_hd", True))
     bi_active = run_bi and (ss.get("run_spearman", True) or ss.get("run_contingency", True))
     multi_active = run_multi and (ss.get("run_cc", True) or ss.get("run_pmse", True))
     has_fidelity = uni_active or bi_active or multi_active
@@ -361,7 +381,12 @@ def _weight_controls():
             if has_fidelity:
                 if uni_active:
                     st.slider("Univariate", 0.0, 1.0, DEFAULT_FIDELITY_WEIGHTS[0], 0.01, key="w_uni")
-                    st.caption(_fidelity_sub_label("run_wd", "WD", "run_tvd", "TVD"))
+                    if ss.get("run_wd", True):
+                        st.slider("↳ Wasserstein", 0.0, 1.0, 1.0, 0.01, key="w_wd_metric")
+                    if ss.get("run_tvd", True):
+                        st.slider("↳ TVD", 0.0, 1.0, 1.0, 0.01, key="w_tvd_metric")
+                    if ss.get("run_hd", True):
+                        st.slider("↳ Hellinger", 0.0, 1.0, 1.0, 0.01, key="w_hd_metric")
                 if bi_active:
                     st.slider("Bivariate", 0.0, 1.0, DEFAULT_FIDELITY_WEIGHTS[1], 0.01, key="w_bi")
                     st.caption(_fidelity_sub_label("run_spearman", "Spearman", "run_contingency", "Contingency"))
@@ -416,7 +441,7 @@ def _get_weights() -> tuple:
     run_multi = ss.get("run_multi", True)
     run_miss = ss.get("run_miss", True)
 
-    uni_active = run_uni and (ss.get("run_wd", True) or ss.get("run_tvd", True))
+    uni_active = run_uni and (ss.get("run_wd", True) or ss.get("run_tvd", True) or ss.get("run_hd", True))
     bi_active = run_bi and (ss.get("run_spearman", True) or ss.get("run_contingency", True))
     multi_active = run_multi and (ss.get("run_cc", True) or ss.get("run_pmse", True))
 
@@ -430,6 +455,13 @@ def _get_weights() -> tuple:
         ss.get("w_bi", DEFAULT_FIDELITY_WEIGHTS[1]) if bi_active else 0.0,
         ss.get("w_multi", DEFAULT_FIDELITY_WEIGHTS[2]) if multi_active else 0.0,
     ]
+    univariate_metric_weights = {}
+    if run_uni and ss.get("run_wd", True):
+        univariate_metric_weights["wasserstein"] = ss.get("w_wd_metric", 1.0)
+    if run_uni and ss.get("run_tvd", True):
+        univariate_metric_weights["tvd"] = ss.get("w_tvd_metric", 1.0)
+    if run_uni and ss.get("run_hd", True):
+        univariate_metric_weights["hellinger"] = ss.get("w_hd_metric", 1.0)
     miss_weights = [
         ss.get("w_rate", DEFAULT_MISSINGNESS_WEIGHTS[0]) if miss_rate_active else 0.0,
         ss.get("w_set", DEFAULT_MISSINGNESS_WEIGHTS[1]) if miss_set_active else 0.0,
@@ -440,7 +472,7 @@ def _get_weights() -> tuple:
         ss.get("w_fid", DEFAULT_COMPOSITE_WEIGHTS[0]) if (uni_active or bi_active or multi_active) else 0.0,
         ss.get("w_miss", DEFAULT_COMPOSITE_WEIGHTS[1]) if (miss_rate_active or miss_set_active or miss_auroc_active or miss_dep_active) else 0.0,
     ]
-    return fidelity_weights, miss_weights, composite_weights
+    return fidelity_weights, univariate_metric_weights, miss_weights, composite_weights
 
 
 # ===========================================================================
@@ -475,9 +507,9 @@ def _tab_individual():
     st.subheader("Scores")
     score_cols = st.columns(3)
 
-    fidelity_weights, miss_weights, composite_weights = _get_weights()
+    fidelity_weights, univariate_metric_weights, miss_weights, composite_weights = _get_weights()
 
-    f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights) if fid_res else {}
+    f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights, univariate_metric_weights=univariate_metric_weights) if fid_res else {}
     m_scores = compute_missingness_score(miss_res, weights=miss_weights) if miss_res else {}
 
     with score_cols[0]:
@@ -503,14 +535,18 @@ def _tab_individual():
 
             wd_res = fid_res["univariate"].get("wasserstein")
             tvd_res = fid_res["univariate"].get("tvd")
+            hd_res = fid_res["univariate"].get("hellinger")
+            hd_vals = hd_res.details.get("hellinger_values", {}) if hd_res else {}
+            hd_col_scores = hd_res.column_scores or {} if hd_res else {}
 
-            if num_cols and wd_res:
-                st.markdown("**Numerical columns — CDF comparison (Wasserstein Distance)**")
-                wd_vals = wd_res.details.get("raw_distances", {})
-                col_scores = wd_res.column_scores or {}
+            if num_cols and (wd_res or hd_res):
+                st.markdown("**Numerical columns — CDF comparison**")
+                wd_vals = wd_res.details.get("raw_distances", {}) if wd_res else {}
+                wd_col_scores = wd_res.column_scores or {} if wd_res else {}
 
-                # Sort by descending WD (most divergent first)
-                sorted_num = sorted(num_cols, key=lambda c: -wd_vals.get(c, 0))
+                # Sort by descending WD if available, else HD
+                sort_key = wd_vals if wd_vals else {c: hd_vals.get(c, 0) for c in num_cols}
+                sorted_num = sorted(num_cols, key=lambda c: -sort_key.get(c, 0))
 
                 n_cols = min(3, len(sorted_num))
                 for row_start in range(0, len(sorted_num), n_cols):
@@ -521,21 +557,28 @@ def _tab_individual():
                             fig = P.plot_numerical_cdf(
                                 real[col], synth[col], col,
                                 wasserstein_distance=wd_vals.get(col),
+                                hellinger_distance=hd_vals.get(col),
                                 synth_label=selected,
                                 synth_color=P.SYNTH_COLORS[0],
                             )
                             st.plotly_chart(fig, use_container_width=True)
-                            if col in col_scores:
-                                st.caption(f"Score: {col_scores[col]:.3f}")
+                            score_parts = []
+                            if col in wd_col_scores:
+                                score_parts.append(f"WD score: {wd_col_scores[col]:.3f}")
+                            if col in hd_col_scores:
+                                score_parts.append(f"HD score: {hd_col_scores[col]:.3f}")
+                            if score_parts:
+                                st.caption("  |  ".join(score_parts))
 
-            if cat_cols and tvd_res:
-                st.markdown("**Categorical columns — frequency comparison (TVD)**")
-                tvd_vals = tvd_res.details.get("tvd_values", {})
-                r_freqs = tvd_res.details.get("real_frequencies", {})
-                s_freqs = tvd_res.details.get("synth_frequencies", {})
-                col_scores = tvd_res.column_scores or {}
+            if cat_cols and (tvd_res or hd_res):
+                st.markdown("**Categorical columns — frequency comparison**")
+                tvd_vals = tvd_res.details.get("tvd_values", {}) if tvd_res else {}
+                r_freqs = tvd_res.details.get("real_frequencies", {}) if tvd_res else {}
+                s_freqs = tvd_res.details.get("synth_frequencies", {}) if tvd_res else {}
+                tvd_col_scores = tvd_res.column_scores or {} if tvd_res else {}
 
-                sorted_cat = sorted(cat_cols, key=lambda c: -tvd_vals.get(c, 0))
+                sort_key = tvd_vals if tvd_vals else {c: hd_vals.get(c, 0) for c in cat_cols}
+                sorted_cat = sorted(cat_cols, key=lambda c: -sort_key.get(c, 0))
 
                 n_cols = min(3, len(sorted_cat))
                 for row_start in range(0, len(sorted_cat), n_cols):
@@ -548,12 +591,18 @@ def _tab_individual():
                             fig = P.plot_categorical_bars(
                                 r_freqs[col], s_freqs[col], col,
                                 tvd=tvd_vals.get(col),
+                                hellinger_distance=hd_vals.get(col),
                                 synth_label=selected,
                                 synth_color=P.SYNTH_COLORS[0],
                             )
                             st.plotly_chart(fig, use_container_width=True)
-                            if col in col_scores:
-                                st.caption(f"Score: {col_scores[col]:.3f}")
+                            score_parts = []
+                            if col in tvd_col_scores:
+                                score_parts.append(f"TVD score: {tvd_col_scores[col]:.3f}")
+                            if col in hd_col_scores:
+                                score_parts.append(f"HD score: {hd_col_scores[col]:.3f}")
+                            if score_parts:
+                                st.caption("  |  ".join(score_parts))
 
     # ------------------------------------------------------------------
     # Bivariate
@@ -700,7 +749,7 @@ def _tab_benchmarking():
         st.info("Run evaluation first (sidebar → **▶ Run evaluation**).")
         return
 
-    fidelity_weights, miss_weights, composite_weights = _get_weights()
+    fidelity_weights, univariate_metric_weights, miss_weights, composite_weights = _get_weights()
 
     st.divider()
 
@@ -714,7 +763,7 @@ def _tab_benchmarking():
         fid_res = fid_all.get(name, {})
         miss_res = miss_all.get(name, {})
 
-        f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights) if fid_res else {}
+        f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights, univariate_metric_weights=univariate_metric_weights) if fid_res else {}
         m_scores = compute_missingness_score(miss_res, weights=miss_weights) if miss_res else {}
         comp = compute_composite_score(f_scores, m_scores, weights=composite_weights) if (f_scores or m_scores) else {}
 
@@ -814,6 +863,415 @@ def _tab_benchmarking():
 
 
 # ===========================================================================
+# Tab 3: Score summary report
+# ===========================================================================
+
+def _tab_score_summary():
+    st.header("Score Summary Report")
+
+    fid_all = st.session_state["fidelity_results"]
+    miss_all = st.session_state["missingness_results"]
+    synths = st.session_state["synth_dfs"]
+
+    if not synths or (not fid_all and not miss_all):
+        st.info("Run evaluation first (sidebar → **▶ Run evaluation**).")
+        return
+
+    fidelity_weights, univariate_metric_weights, miss_weights, composite_weights = _get_weights()
+    run_names = list(synths.keys())
+
+    # ------------------------------------------------------------------
+    # Helper: normalise a weight dict, keeping only present keys
+    # ------------------------------------------------------------------
+    def _norm_dict(d: dict) -> dict:
+        total = sum(d.values())
+        return {k: v / total for k, v in d.items()} if total > 0 else d
+
+    # ------------------------------------------------------------------
+    # Build per-variable table
+    # ------------------------------------------------------------------
+    # Normalised weights for group-level fidelity
+    fid_group_names = ["univariate", "bivariate", "multivariate"]
+    fid_group_w_raw = dict(zip(fid_group_names, fidelity_weights))
+
+    # Normalised weights within univariate metrics
+    uni_metric_w_norm = _norm_dict(univariate_metric_weights) if univariate_metric_weights else {}
+
+    # Normalised weights within missingness metrics
+    miss_metric_names = ["rate", "set_distribution", "classifier_auroc", "dependency_structure"]
+    miss_metric_w_raw = dict(zip(miss_metric_names, miss_weights))
+
+    rows = []
+
+    # --- Per-variable rows for WD, TVD, Hellinger ---
+    # Collect all columns seen across runs
+    for metric_key, metric_label, col_type_filter in [
+        ("wasserstein", "Wasserstein Distance", "numerical"),
+        ("tvd", "Total Variation Distance", "categorical"),
+        ("hellinger", "Hellinger Distance", None),  # covers all columns
+    ]:
+        col_types = st.session_state["col_types"] or {}
+        if col_type_filter:
+            variable_cols = [c for c, t in col_types.items() if t == col_type_filter]
+        else:
+            variable_cols = list(col_types.keys())
+
+        # Collect all variables seen for this metric
+        all_vars: set = set()
+        for name in run_names:
+            fid_res = fid_all.get(name, {})
+            uni = fid_res.get("univariate", {})
+            res = uni.get(metric_key)
+            if res and res.column_scores:
+                all_vars.update(res.column_scores.keys())
+        all_vars = sorted(all_vars & set(variable_cols)) or sorted(all_vars)
+
+        uni_w_total = sum(fidelity_weights[:1]) if fidelity_weights else 0.0  # univariate group weight (raw)
+
+        for var in all_vars:
+            row = {
+                "Metric": metric_label,
+                "Variable": var,
+            }
+            # Normalised weight contribution of this metric×variable to fidelity score
+            if uni_metric_w_norm and metric_key in uni_metric_w_norm:
+                metric_share = uni_metric_w_norm[metric_key]
+            else:
+                n_active = len(uni_metric_w_norm) if uni_metric_w_norm else 1
+                metric_share = 1.0 / n_active if n_active else 0.0
+            row["Metric weight (in univariate)"] = f"{metric_share:.3f}"
+
+            for name in run_names:
+                fid_res = fid_all.get(name, {})
+                uni = fid_res.get("univariate", {})
+                res = uni.get(metric_key)
+                score = res.column_scores.get(var) if (res and res.column_scores) else None
+                row[name] = f"{score:.4f}" if score is not None else "—"
+
+            rows.append(row)
+
+    # --- Group-level summary rows for bivariate, multivariate, missingness ---
+    # Normalised fidelity group weights (only present groups)
+    present_fid_groups = [
+        g for g in fid_group_names
+        if any(g in fid_all.get(n, {}) for n in run_names)
+    ]
+    norm_fid_w = _norm_dict({g: fid_group_w_raw[g] for g in present_fid_groups if fid_group_w_raw.get(g, 0) > 0})
+
+    # --- Per-pair rows for Spearman (pair score = 1 - |diff|) ---
+    if any("bivariate" in fid_all.get(n, {}) and "spearman" in fid_all.get(n, {})["bivariate"] for n in run_names):
+        all_pairs: set = set()
+        for name in run_names:
+            res = fid_all.get(name, {}).get("bivariate", {}).get("spearman")
+            if res:
+                all_pairs.update(res.details.get("pair_differences", {}).keys())
+        for pair in sorted(all_pairs):
+            col1, col2 = pair.split("|")
+            row = {
+                "Metric": "Spearman Correlation",
+                "Variable": f"{col1} × {col2}",
+                "Metric weight (in univariate)": "—",
+            }
+            for name in run_names:
+                res = fid_all.get(name, {}).get("bivariate", {}).get("spearman")
+                diff = res.details.get("pair_differences", {}).get(pair) if res else None
+                score = (1.0 - diff) if diff is not None else None
+                row[name] = f"{score:.4f}" if score is not None else "—"
+            rows.append(row)
+
+    # --- Per-pair rows for Contingency (pair score = 1 - TVD) ---
+    if any("bivariate" in fid_all.get(n, {}) and "contingency" in fid_all.get(n, {})["bivariate"] for n in run_names):
+        all_pairs = set()
+        for name in run_names:
+            res = fid_all.get(name, {}).get("bivariate", {}).get("contingency")
+            if res:
+                all_pairs.update(res.details.get("pair_tvds", {}).keys())
+        for pair in sorted(all_pairs):
+            col1, col2 = pair.split("|")
+            row = {
+                "Metric": "Contingency TVD",
+                "Variable": f"{col1} × {col2}",
+                "Metric weight (in univariate)": "—",
+            }
+            for name in run_names:
+                res = fid_all.get(name, {}).get("bivariate", {}).get("contingency")
+                tvd = res.details.get("pair_tvds", {}).get(pair) if res else None
+                score = (1.0 - tvd) if tvd is not None else None
+                row[name] = f"{score:.4f}" if score is not None else "—"
+            rows.append(row)
+
+    # --- Group-level summary rows for multivariate ---
+    for group_key, group_label, sub_key in [
+        ("multivariate", "Multivariate (Cross-classification)", "cross_classification"),
+        ("multivariate", "Multivariate (Propensity MSE)", "propensity_mse"),
+    ]:
+        if not any(sub_key in fid_all.get(n, {}).get(group_key, {}) for n in run_names):
+            continue
+        row = {
+            "Metric": group_label,
+            "Variable": "(overall)",
+            "Metric weight (in univariate)": "—",
+        }
+        for name in run_names:
+            res = fid_all.get(name, {}).get(group_key, {}).get(sub_key)
+            score = res.score if res else None
+            row[name] = f"{score:.4f}" if score is not None else "—"
+        rows.append(row)
+
+    # --- Missingness metric rows ---
+    miss_label_map = {
+        "rate": "Missingness Rate",
+        "set_distribution": "Missingness Pattern Distribution",
+        "classifier_auroc": "Missingness Classifier AUROC",
+        "dependency_structure": "Missingness Dependency Structure",
+    }
+    present_miss = [
+        m for m in miss_metric_names
+        if any(m in miss_all.get(n, {}) for n in run_names)
+    ]
+    norm_miss_w = _norm_dict({m: miss_metric_w_raw[m] for m in present_miss if miss_metric_w_raw.get(m, 0) > 0})
+
+    for m_key in present_miss:
+        row = {
+            "Metric": miss_label_map[m_key],
+            "Variable": "(overall)",
+            "Metric weight (in univariate)": "—",
+        }
+        for name in run_names:
+            res = miss_all.get(name, {}).get(m_key)
+            score = res.score if res else None
+            row[name] = f"{score:.4f}" if score is not None else "—"
+        rows.append(row)
+
+    # --- Weighted score summary rows ---
+    separator = {"Metric": "─" * 20, "Variable": "", "Metric weight (in univariate)": ""}
+    for name in run_names:
+        separator[name] = ""
+    rows.append(separator)
+
+    for name in run_names:
+        fid_res = fid_all.get(name, {})
+        miss_res = miss_all.get(name, {})
+        f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights, univariate_metric_weights=univariate_metric_weights) if fid_res else {}
+        m_scores = compute_missingness_score(miss_res, weights=miss_weights) if miss_res else {}
+        comp = compute_composite_score(f_scores, m_scores, weights=composite_weights) if (f_scores or m_scores) else {}
+
+    # One summary row per aggregate score type
+    norm_comp_w = _norm_dict(dict(zip(["fidelity", "missingness"], composite_weights)))
+    for score_label, score_key, weight_note in [
+        ("Univariate score", "univariate", f"group weight: {fidelity_weights[0]:.3f}"),
+        ("Bivariate score", "bivariate", f"group weight: {fidelity_weights[1]:.3f}"),
+        ("Multivariate score", "multivariate", f"group weight: {fidelity_weights[2]:.3f}"),
+        ("Fidelity score (overall)", "overall_fidelity", f"composite weight: {norm_comp_w.get('fidelity', 0):.3f}"),
+        ("Missingness score (overall)", "overall_missingness", f"composite weight: {norm_comp_w.get('missingness', 0):.3f}"),
+        ("Composite score", "composite", ""),
+    ]:
+        row = {
+            "Metric": score_label,
+            "Variable": "",
+            "Metric weight (in univariate)": weight_note,
+        }
+        for name in run_names:
+            fid_res = fid_all.get(name, {})
+            miss_res = miss_all.get(name, {})
+            f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights, univariate_metric_weights=univariate_metric_weights) if fid_res else {}
+            m_scores = compute_missingness_score(miss_res, weights=miss_weights) if miss_res else {}
+            comp = compute_composite_score(f_scores, m_scores, weights=composite_weights) if (f_scores or m_scores) else {}
+
+            if score_key == "composite":
+                val = comp.get("composite")
+            elif score_key == "overall_fidelity":
+                val = f_scores.get("overall")
+            elif score_key == "overall_missingness":
+                val = m_scores.get("overall")
+            else:
+                val = f_scores.get(score_key)
+            row[name] = f"{val:.4f}" if val is not None else "—"
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+
+    # ------------------------------------------------------------------
+    # Render
+    # ------------------------------------------------------------------
+    st.subheader("Per-variable and per-metric scores across runs")
+    st.caption(
+        "Metric weight (in univariate) shows the normalised weight of that metric "
+        "within the univariate group score. Weight notes in the summary rows show "
+        "how each group contributes to the final composite score."
+    )
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    # Download button
+    csv = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download as CSV",
+        data=csv,
+        file_name="score_summary.csv",
+        mime="text/csv",
+    )
+
+
+# ===========================================================================
+# Tab 4: Metric correlation analysis
+# ===========================================================================
+
+def _tab_metric_correlation():
+    st.header("Metric Correlation Analysis")
+    st.warning("TO-DO: Quality check the logic")
+    st.caption(
+        "How much do the different metrics agree with each other? "
+        "**Across variables**: do metrics identify the same variables as well/poorly reproduced? "
+        "**Across runs**: do metrics agree on which synthetic dataset is best?"
+    )
+
+    fid_all = st.session_state["fidelity_results"]
+    synths = st.session_state["synth_dfs"]
+
+    if not synths or not fid_all:
+        st.info("Run evaluation first (sidebar → **▶ Run evaluation**).")
+        return
+
+    run_names = list(synths.keys())
+    col_types = st.session_state["col_types"] or {}
+    num_cols = [c for c, t in col_types.items() if t == "numerical"]
+    cat_cols = [c for c, t in col_types.items() if t == "categorical"]
+
+
+    # ------------------------------------------------------------------
+    # Section 1: Across-variable correlation (per run)
+    # ------------------------------------------------------------------
+    st.subheader("1 · Across-variable metric agreement")
+    st.caption(
+        "Each cell shows the Pearson correlation of two metrics' per-variable (or per-pair) "
+        "scores. High correlation means both metrics agree on which variables are "
+        "well/poorly reproduced."
+    )
+
+    run_sel = st.selectbox("Select run", run_names, key="mc_run_sel")
+    fid_res = fid_all.get(run_sel, {})
+    uni = fid_res.get("univariate", {})
+    bi = fid_res.get("bivariate", {})
+
+    # Build score vectors keyed by variable/pair
+    metric_vectors: dict[str, dict[str, float]] = {}
+
+    # Univariate metrics — per column scores
+    for mkey, mlabel in [
+        ("wasserstein", "Wasserstein (num)"),
+        ("tvd", "TVD (cat)"),
+        ("hellinger", "Hellinger"),
+    ]:
+        res = uni.get(mkey)
+        if res and res.column_scores:
+            metric_vectors[mlabel] = dict(res.column_scores)
+
+    # Spearman — per pair score = 1 - |diff|
+    sp_res = bi.get("spearman")
+    if sp_res:
+        pair_diffs = sp_res.details.get("pair_differences", {})
+        metric_vectors["Spearman (pairs)"] = {k: 1.0 - v for k, v in pair_diffs.items()}
+
+    # Contingency — per pair score = 1 - TVD
+    ct_res = bi.get("contingency")
+    if ct_res:
+        pair_tvds = ct_res.details.get("pair_tvds", {})
+        metric_vectors["Contingency (pairs)"] = {k: 1.0 - v for k, v in pair_tvds.items()}
+
+    if len(metric_vectors) < 2:
+        st.info("Need at least 2 metrics with per-variable scores to compute correlations.")
+    else:
+        # Build a DataFrame: index = union of all variables/pairs, columns = metrics
+        all_keys = sorted(set(k for v in metric_vectors.values() for k in v))
+        score_df = pd.DataFrame(
+            {label: [vec.get(k, float("nan")) for k in all_keys] for label, vec in metric_vectors.items()},
+            index=all_keys,
+        )
+
+        # Pearson correlation between metric columns (pairwise, ignoring NaN)
+        corr_df = score_df.corr(method="pearson")
+
+        st.plotly_chart(P.plot_metric_correlation_heatmap(corr_df, f"Metric agreement across variables — {run_sel}"), use_container_width=True)
+
+        with st.expander("Raw scores per variable / pair"):
+            st.dataframe(
+                score_df.style.format("{:.4f}", na_rep="—"),
+                use_container_width=True,
+            )
+
+    # ------------------------------------------------------------------
+    # Section 2: Across-run correlation (all runs)
+    # ------------------------------------------------------------------
+    st.subheader("2 · Across-run metric agreement")
+    st.caption(
+        "Each cell shows the Pearson correlation of two metrics' overall scores across runs. "
+        "High correlation means both metrics agree on which synthetic dataset is best. "
+        "Hellinger is split into numerical and categorical subsets so it is directly "
+        "comparable to Wasserstein (numerical only) and TVD (categorical only)."
+    )
+
+    if len(run_names) < 2:
+        st.info("Need at least 2 runs to compute across-run correlations.")
+        return
+
+    # Build a DataFrame: index = run names, columns = metrics (overall scores)
+    # Hellinger is split into numerical and categorical subsets so that it is
+    # directly comparable to WD (numerical only) and TVD (categorical only).
+    run_metric_scores: dict[str, dict[str, float]] = {name: {} for name in run_names}
+
+    for name in run_names:
+        fres = fid_all.get(name, {})
+        uni = fres.get("univariate", {})
+
+        # WD — numerical columns only
+        wd_res = uni.get("wasserstein")
+        if wd_res is not None:
+            run_metric_scores[name]["Wasserstein (num)"] = wd_res.score
+
+        # TVD — categorical columns only
+        tvd_res = uni.get("tvd")
+        if tvd_res is not None:
+            run_metric_scores[name]["TVD (cat)"] = tvd_res.score
+
+        # Hellinger split by column type so comparisons are like-for-like
+        hd_res = uni.get("hellinger")
+        if hd_res and hd_res.column_scores:
+            num_scores = [v for c, v in hd_res.column_scores.items() if col_types.get(c) == "numerical"]
+            cat_scores = [v for c, v in hd_res.column_scores.items() if col_types.get(c) == "categorical"]
+            if num_scores:
+                run_metric_scores[name]["Hellinger (num)"] = float(np.mean(num_scores))
+            if cat_scores:
+                run_metric_scores[name]["Hellinger (cat)"] = float(np.mean(cat_scores))
+
+        # Bivariate and multivariate — already type-specific by design
+        for group, mkey, label in [
+            ("bivariate", "spearman", "Spearman"),
+            ("bivariate", "contingency", "Contingency"),
+            ("multivariate", "cross_classification", "Cross-classification"),
+            ("multivariate", "propensity_mse", "Propensity MSE"),
+        ]:
+            res = fres.get(group, {}).get(mkey)
+            if res is not None:
+                run_metric_scores[name][label] = res.score
+
+    run_df = pd.DataFrame(run_metric_scores).T  # rows = runs, cols = metrics
+    run_df = run_df.dropna(axis=1, how="all")
+
+    if run_df.shape[1] < 2:
+        st.info("Need at least 2 metrics with overall scores to compute across-run correlations.")
+        return
+
+    run_corr = run_df.corr(method="pearson")
+    st.plotly_chart(P.plot_metric_correlation_heatmap(run_corr, "Metric agreement across runs"), use_container_width=True)
+
+    with st.expander("Overall scores per run"):
+        st.dataframe(
+            run_df.style.format("{:.4f}", na_rep="—"),
+            use_container_width=True,
+        )
+
+
+# ===========================================================================
 # Main app entry point
 # ===========================================================================
 
@@ -841,11 +1299,15 @@ def run_dashboard():
 
     _weight_controls()
 
-    tab1, tab2 = st.tabs(["📊 Individual Report", "🏆 Benchmarking Report"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Individual Report", "🏆 Benchmarking Report", "📋 Score Summary", "🔗 Metric Correlations"])
     with tab1:
         _tab_individual()
     with tab2:
         _tab_benchmarking()
+    with tab3:
+        _tab_score_summary()
+    with tab4:
+        _tab_metric_correlation()
 
 
 if __name__ == "__main__":

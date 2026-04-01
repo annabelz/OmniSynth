@@ -75,7 +75,7 @@ class WassersteinDistance(BaseMetric):
 
             wd = wasserstein_distance(r, s)
             iqr = float(np.percentile(r, 75) - np.percentile(r, 25))
-            norm_wd = wd / (iqr + 1e-8)
+            norm_wd = wd / (iqr + 1e-8) # add small epsilon to avoid division by zero
 
             raw_distances[col] = float(wd)
             normalised_distances[col] = float(norm_wd)
@@ -97,6 +97,111 @@ class WassersteinDistance(BaseMetric):
                 "raw_distances": raw_distances,
                 "normalised_distances": normalised_distances,
             },
+            column_scores=column_scores,
+        )
+
+
+class HellingerDistance(BaseMetric):
+    """
+    Hellinger distance for both numerical and categorical columns.
+
+    For **categorical** columns, frequency distributions P and Q are compared
+    directly using the Hellinger formula:
+
+        H(P, Q) = (1/√2) · √(Σ (√p_i − √q_i)²)  ∈ [0, 1]
+
+    For **numerical** columns, both real and synthetic values are binned into a
+    shared histogram over the combined value range, and the same formula is
+    applied to the resulting discrete distributions.
+
+    Per-column score = 1 − H, so 1 = identical distributions, 0 = maximally
+    divergent.  The overall score is the mean across all columns.
+    """
+
+    name = "Hellinger Distance"
+    description = (
+        "Hellinger distance between real and synthetic distributions for each column "
+        "(histogram-based for numerical, frequency-based for categorical)."
+    )
+    axis = "fidelity"
+
+    def __init__(self, n_bins: int = 50) -> None:
+        self.n_bins = n_bins
+
+    def _hellinger(self, p: np.ndarray, q: np.ndarray) -> float:
+        """Compute Hellinger distance between two normalised probability vectors."""
+        return float((1 / np.sqrt(2)) * np.sqrt(np.sum((np.sqrt(p) - np.sqrt(q)) ** 2)))
+
+    def evaluate(
+        self,
+        real: pd.DataFrame,
+        synthetic: pd.DataFrame,
+        col_types: ColumnTypes,
+    ) -> MetricResult:
+        num_cols = get_numerical_columns(col_types)
+        cat_cols = get_categorical_columns(col_types)
+
+        hellinger_values: Dict[str, float] = {}
+        column_scores: Dict[str, float] = {}
+
+        # --- Numerical columns (histogram-based) ---
+        for col in num_cols:
+            r = real[col].dropna().values.astype(float)
+            s = synthetic[col].dropna().values.astype(float)
+
+            if len(r) == 0 or len(s) == 0:
+                warnings.warn(f"HellingerDistance: column '{col}' has no non-null values — skipped.")
+                continue
+
+            lo = min(r.min(), s.min())
+            hi = max(r.max(), s.max())
+            if lo == hi:
+                hellinger_values[col] = 0.0
+                column_scores[col] = 1.0
+                continue
+
+            bins = np.linspace(lo, hi, self.n_bins + 1)
+            r_hist, _ = np.histogram(r, bins=bins)
+            s_hist, _ = np.histogram(s, bins=bins)
+            r_prob = r_hist / r_hist.sum()
+            s_prob = s_hist / s_hist.sum()
+
+            hd = self._hellinger(r_prob, s_prob)
+            hellinger_values[col] = hd
+            column_scores[col] = 1.0 - hd
+
+        # --- Categorical columns (frequency-based) ---
+        for col in cat_cols:
+            r = real[col].dropna()
+            s = synthetic[col].dropna()
+
+            if len(r) == 0 or len(s) == 0:
+                warnings.warn(f"HellingerDistance: column '{col}' has no non-null values — skipped.")
+                continue
+
+            all_cats = set(r.unique()) | set(s.unique())
+            r_freq = r.value_counts(normalize=True)
+            s_freq = s.value_counts(normalize=True)
+            p = np.array([r_freq.get(cat, 0.0) for cat in all_cats])
+            q = np.array([s_freq.get(cat, 0.0) for cat in all_cats])
+
+            hd = self._hellinger(p, q)
+            hellinger_values[col] = hd
+            column_scores[col] = 1.0 - hd
+
+        if not column_scores:
+            return MetricResult(
+                metric_name=self.name,
+                score=1.0,
+                details={"message": "No columns found."},
+            )
+
+        overall_score = float(np.mean(list(column_scores.values())))
+
+        return MetricResult(
+            metric_name=self.name,
+            score=overall_score,
+            details={"hellinger_values": hellinger_values},
             column_scores=column_scores,
         )
 

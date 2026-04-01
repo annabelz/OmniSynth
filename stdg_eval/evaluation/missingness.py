@@ -61,15 +61,15 @@ def evaluate_missingness(
 
     results: MissingnessResults = {}
 
-    if run_rate:
+    if run_rate and mc.run_rate:
         results["rate"] = MissingnessRate().evaluate(real, synthetic, col_types)
 
-    if run_set_distribution:
+    if run_set_distribution and mc.run_set_distribution:
         results["set_distribution"] = MissingnessSetDistribution().evaluate(
             real, synthetic, col_types
         )
 
-    if run_classifier_auroc:
+    if run_classifier_auroc and mc.run_classifier_auroc:
         results["classifier_auroc"] = MissingnessClassifierAUROC(
             model=mc.classifier_model,
             max_iter=mc.classifier_max_iter,
@@ -78,7 +78,7 @@ def evaluate_missingness(
             random_state=cfg.random_state,
         ).evaluate(real, synthetic, col_types)
 
-    if run_dependency_structure:
+    if run_dependency_structure and mc.run_dependency_structure:
         results["dependency_structure"] = MissingnessDependencyStructure(
             method=mc.dependency_method
         ).evaluate(real, synthetic, col_types)

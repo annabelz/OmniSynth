@@ -19,6 +19,9 @@ import yaml
 from stdg_eval.config import (
     CATEGORICAL_CARDINALITY_THRESHOLD,
     CATEGORICAL_MAX_UNIQUE,
+    EvalConfig,
+    FidelityConfig,
+    MissingnessConfig,
 )
 
 ColumnTypes = Dict[str, str]  # column name -> "numerical" | "categorical"
@@ -212,6 +215,21 @@ def load_config(path: str | pathlib.Path) -> dict:
         One entry per synthetic dataset.
     column_types : dict, optional
         ``{column_name: "numerical"|"categorical"}`` overrides.
+    metrics : dict, optional
+        Per-metric enable flags, e.g.::
+
+            metrics:
+              wasserstein: false
+              tvd: false
+              hellinger: true
+              spearman: true
+              contingency: true
+              cross_classification: true
+              propensity_mse: true
+              rate: true
+              set_distribution: true
+              classifier_auroc: true
+              dependency_structure: true
 
     Example
     -------
@@ -226,6 +244,9 @@ def load_config(path: str | pathlib.Path) -> dict:
         column_types:
           age: numerical
           sex: categorical
+        metrics:
+          wasserstein: false
+          hellinger: true
     """
     path = pathlib.Path(path)
     suffix = path.suffix.lower()
@@ -243,3 +264,30 @@ def load_config(path: str | pathlib.Path) -> dict:
             ],
         }
     raise ValueError(f"Unsupported config format: {suffix!r}. Use YAML or .txt.")
+
+
+def eval_config_from_dict(cfg: dict) -> EvalConfig:
+    """
+    Build an :class:`~stdg_eval.config.EvalConfig` from a loaded config dict.
+
+    Reads the optional ``metrics`` key and maps it to ``FidelityConfig`` and
+    ``MissingnessConfig`` enable flags.  Unknown metric names are silently ignored.
+    """
+    metrics = cfg.get("metrics") or {}
+
+    fidelity = FidelityConfig(
+        run_wasserstein=metrics.get("wasserstein", True),
+        run_tvd=metrics.get("tvd", True),
+        run_hellinger=metrics.get("hellinger", True),
+        run_spearman=metrics.get("spearman", True),
+        run_contingency=metrics.get("contingency", True),
+        run_cross_classification=metrics.get("cross_classification", True),
+        run_propensity_mse=metrics.get("propensity_mse", True),
+    )
+    missingness = MissingnessConfig(
+        run_rate=metrics.get("rate", True),
+        run_set_distribution=metrics.get("set_distribution", True),
+        run_classifier_auroc=metrics.get("classifier_auroc", True),
+        run_dependency_structure=metrics.get("dependency_structure", True),
+    )
+    return EvalConfig(fidelity=fidelity, missingness=missingness)

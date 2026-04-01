@@ -40,6 +40,7 @@ def plot_numerical_cdf(
     synthetic: pd.Series,
     column_name: str,
     wasserstein_distance: Optional[float] = None,
+    hellinger_distance: Optional[float] = None,
     synth_label: str = "Synthetic",
     synth_color: str = SYNTH_COLORS[0],
 ) -> go.Figure:
@@ -60,8 +61,13 @@ def plot_numerical_cdf(
                              line=dict(color=synth_color, width=2, dash="dash")))
 
     title = f"CDF — {column_name}"
+    annotations = []
     if wasserstein_distance is not None:
-        title += f"  (WD = {wasserstein_distance:.4f})"
+        annotations.append(f"WD = {wasserstein_distance:.4f}")
+    if hellinger_distance is not None:
+        annotations.append(f"HD = {hellinger_distance:.4f}")
+    if annotations:
+        title += "  (" + "  |  ".join(annotations) + ")"
 
     fig.update_layout(
         title=title,
@@ -79,6 +85,7 @@ def plot_categorical_bars(
     synth_freq: Dict,
     column_name: str,
     tvd: Optional[float] = None,
+    hellinger_distance: Optional[float] = None,
     synth_label: str = "Synthetic",
     synth_color: str = SYNTH_COLORS[0],
 ) -> go.Figure:
@@ -96,8 +103,13 @@ def plot_categorical_bars(
                          name=synth_label, marker_color=synth_color))
 
     title = f"Category frequencies — {column_name}"
+    annotations = []
     if tvd is not None:
-        title += f"  (TVD = {tvd:.4f})"
+        annotations.append(f"TVD = {tvd:.4f}")
+    if hellinger_distance is not None:
+        annotations.append(f"HD = {hellinger_distance:.4f}")
+    if annotations:
+        title += "  (" + "  |  ".join(annotations) + ")"
 
     fig.update_layout(
         title=title,
@@ -327,6 +339,29 @@ def plot_score_radar(
         title="Score comparison (radar)",
         height=450,
         showlegend=True,
+    )
+    return fig
+
+
+def plot_metric_correlation_heatmap(corr_df: pd.DataFrame, title: str = "Metric correlation") -> go.Figure:
+    """
+    Annotated heatmap of a metric-vs-metric Pearson correlation matrix.
+    Values range from -1 to 1 on a RdBu scale.
+    """
+    labels = corr_df.columns.tolist()
+    z = corr_df.values
+    text = [[f"{v:.2f}" if not np.isnan(v) else "—" for v in row] for row in z]
+    fig = go.Figure(go.Heatmap(
+        z=z, x=labels, y=labels,
+        text=text, texttemplate="%{text}",
+        colorscale="RdBu", zmin=-1, zmax=1,
+        colorbar=dict(title="r"),
+    ))
+    fig.update_layout(
+        title=title,
+        height=max(300, 60 * len(labels) + 100),
+        margin=dict(l=120, r=40, t=60, b=120),
+        xaxis_tickangle=-40,
     )
     return fig
 

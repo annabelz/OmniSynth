@@ -66,6 +66,7 @@ def _group_score(group: Dict[str, MetricResult]) -> float:
 def compute_fidelity_score(
     fidelity_results: Dict[str, Dict[str, MetricResult]],
     weights: Optional[List[float]] = None,
+    univariate_metric_weights: Optional[Dict[str, float]] = None,
 ) -> Dict[str, float]:
     """
     Compute a weighted fidelity score from :func:`evaluate_fidelity` results.
@@ -78,6 +79,9 @@ def compute_fidelity_score(
         ``[univariate_weight, bivariate_weight, multivariate_weight]``.
         Defaults to ``DEFAULT_FIDELITY_WEIGHTS`` (equal weights).
         Only groups that are present in *fidelity_results* contribute.
+    univariate_metric_weights:
+        ``{"wasserstein": w, "tvd": w, "hellinger": w}`` weights applied within
+        the univariate group. Defaults to equal weighting across present metrics.
 
     Returns
     -------
@@ -100,9 +104,23 @@ def compute_fidelity_score(
     full_weights = dict(zip(group_names, weights))
     active_weights = _normalise_weights([full_weights.get(g, 0.0) for g in present])
 
-    group_scores = {g: _group_score(fidelity_results[g]) for g in present}
-    score_vec = [group_scores[g] for g in present]
+    def _univariate_score(group: Dict[str, MetricResult]) -> float:
+        if not univariate_metric_weights:
+            return _group_score(group)
+        present_metrics = [k for k in group if k in univariate_metric_weights]
+        if not present_metrics:
+            return _group_score(group)
+        w = _normalise_weights([univariate_metric_weights[k] for k in present_metrics])
+        return float(np.dot([group[k].score for k in present_metrics], w))
 
+    group_scores = {}
+    for g in present:
+        if g == "univariate":
+            group_scores[g] = _univariate_score(fidelity_results[g])
+        else:
+            group_scores[g] = _group_score(fidelity_results[g])
+
+    score_vec = [group_scores[g] for g in present]
     overall = _weighted_average(score_vec, active_weights)
 
     return {
