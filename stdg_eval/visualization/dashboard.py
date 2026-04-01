@@ -50,7 +50,7 @@ from stdg_eval.evaluation.scoring import (
     compute_fidelity_score,
     compute_missingness_score,
 )
-from stdg_eval.utils.data_utils import detect_column_types, load_dataset, load_config
+from stdg_eval.utils.data_utils import detect_column_types, load_dataset, load_config, validate_column_types
 from stdg_eval.visualization import plots as P
 
 
@@ -247,6 +247,15 @@ def _run_evaluation(
 
     fidelity_results = {}
     missingness_results = {}
+
+    # Validate column types and surface any warnings in the UI before evaluation
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        validate_column_types(real, col_types, dataset_label="real")
+        for name, synth in synths.items():
+            validate_column_types(synth, col_types, dataset_label=f"synthetic ({name})")
+    for w in caught:
+        st.warning(str(w.message))
 
     progress = st.sidebar.progress(0, text="Evaluating…")
     n = len(synths)
@@ -620,14 +629,15 @@ def _tab_individual():
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
+            shared_cols = [c for c in real.columns if c in synth.columns]
             miss_pattern_cols = st.columns(2)
             with miss_pattern_cols[0]:
                 st.markdown("**Real — missingness pattern**")
-                fig = P.plot_missingness_pattern_heatmap(real, title="Real: missingness pattern")
+                fig = P.plot_missingness_pattern_heatmap(real[shared_cols], title="Real: missingness pattern")
                 st.plotly_chart(fig, use_container_width=True)
             with miss_pattern_cols[1]:
                 st.markdown(f"**{selected} — missingness pattern**")
-                fig = P.plot_missingness_pattern_heatmap(synth, title=f"{selected}: missingness pattern")
+                fig = P.plot_missingness_pattern_heatmap(synth[shared_cols], title=f"{selected}: missingness pattern")
                 st.plotly_chart(fig, use_container_width=True)
 
             if dep_res and "columns" in dep_res.details:

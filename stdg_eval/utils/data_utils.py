@@ -137,7 +137,55 @@ def align_columns(
     # Only keep types for shared columns
     col_types = {c: col_types.get(c, "numerical") for c in shared}
 
+    validate_column_types(real_a, col_types, dataset_label="real")
+    validate_column_types(synth_a, col_types, dataset_label="synthetic")
+
     return real_a, synth_a, col_types
+
+
+def validate_column_types(
+    df: pd.DataFrame,
+    col_types: ColumnTypes,
+    dataset_label: str = "dataset",
+) -> None:
+    """
+    Warn if column values don't match their assigned types.
+
+    - Numerical columns must contain numeric data; warns if a column assigned
+      ``"numerical"`` has a non-numeric dtype (e.g. strings).
+    - Categorical columns should not be high-cardinality numeric data; warns if
+      a column assigned ``"categorical"`` looks like it should be numerical.
+    """
+    import warnings
+
+    for col, ctype in col_types.items():
+        if col not in df.columns:
+            continue
+        series = df[col]
+
+        if ctype == "numerical":
+            if not pd.api.types.is_numeric_dtype(series):
+                warnings.warn(
+                    f"[{dataset_label}] Column '{col}' is assigned type 'numerical' "
+                    f"but contains non-numeric data (dtype: {series.dtype}). "
+                    "This may cause errors in metric computation.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+        elif ctype == "categorical":
+            if pd.api.types.is_numeric_dtype(series):
+                n_unique = series.nunique(dropna=True)
+                n_rows = len(series)
+                frac = n_unique / max(n_rows, 1)
+                if n_unique > CATEGORICAL_MAX_UNIQUE or frac > CATEGORICAL_CARDINALITY_THRESHOLD:
+                    warnings.warn(
+                        f"[{dataset_label}] Column '{col}' is assigned type 'categorical' "
+                        f"but contains numeric data with high cardinality "
+                        f"({n_unique} unique values, {frac:.1%} of rows). "
+                        "Consider assigning it as 'numerical' instead.",
+                        UserWarning,
+                        stacklevel=3,
+                    )
 
 
 def get_numerical_columns(col_types: ColumnTypes) -> List[str]:

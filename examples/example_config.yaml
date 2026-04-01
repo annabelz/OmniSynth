@@ -1,9 +1,9 @@
-real_data: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/real.csv
+real_data: /home/annabelzhu/Repositories/stdg-eval/examples/data/real.csv
 synthetic_datasets:
 - name: synth1
-  path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/synth1.csv
+  path: /home/annabelzhu/Repositories/stdg-eval/examples/data/synth1.csv
 - name: synth2
-  path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/synth2.csv
+  path: /home/annabelzhu/Repositories/stdg-eval/examples/data/synth2.csv
 column_types:
   age: numerical
   bmi: numerical
