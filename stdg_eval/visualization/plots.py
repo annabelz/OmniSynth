@@ -162,6 +162,116 @@ def plot_correlation_heatmaps(
     return fig
 
 
+def _build_symmetric_matrix(
+    pair_values: Dict[str, float],
+    all_cols: List[str],
+    diagonal: Optional[float] = None,
+) -> np.ndarray:
+    """
+    Build a symmetric N×N matrix from a dict keyed by ``"colA|colB"`` pairs.
+
+    Cells with no entry remain ``nan``. The diagonal is set to ``diagonal``
+    if provided, otherwise left as ``nan``.
+    """
+    n = len(all_cols)
+    col_idx = {c: i for i, c in enumerate(all_cols)}
+    mat = np.full((n, n), np.nan)
+    if diagonal is not None:
+        np.fill_diagonal(mat, diagonal)
+    for key, val in pair_values.items():
+        parts = key.split("|", 1)
+        if len(parts) != 2:
+            continue
+        c1, c2 = parts
+        if c1 in col_idx and c2 in col_idx:
+            i, j = col_idx[c1], col_idx[c2]
+            mat[i, j] = val
+            mat[j, i] = val
+    return mat
+
+
+def plot_pcd_heatmaps(
+    pair_real: Dict[str, float],
+    pair_synth: Dict[str, float],
+    pair_diffs: Dict[str, float],
+    all_cols: List[str],
+    synth_label: str = "Synthetic",
+) -> go.Figure:
+    """
+    Three-panel heatmap for PCD results: real phi-k, synthetic phi-k, and |Δ|.
+
+    Produces a symmetric N×N matrix (all variables on both axes) with the
+    diagonal set to 1.0 for real/synth panels and 0.0 for the difference panel.
+    """
+    real_mat = _build_symmetric_matrix(pair_real, all_cols, diagonal=1.0)
+    synth_mat = _build_symmetric_matrix(pair_synth, all_cols, diagonal=1.0)
+    diff_mat = _build_symmetric_matrix(pair_diffs, all_cols, diagonal=0.0)
+
+    height = max(350, 40 * len(all_cols) + 100)
+    fig = make_subplots(
+        rows=1, cols=3,
+        subplot_titles=["Real", synth_label, "|Δ| Difference"],
+        horizontal_spacing=0.08,
+    )
+
+    def _fmt(mat):
+        return [[f"{v:.3f}" if not np.isnan(v) else "" for v in row] for row in mat]
+
+    kw_assoc = dict(zmin=0, zmax=1, colorscale="Blues", showscale=False)
+    fig.add_trace(go.Heatmap(
+        z=real_mat, x=all_cols, y=all_cols, text=_fmt(real_mat),
+        texttemplate="%{text}", colorscale="Blues", zmin=0, zmax=1,
+        showscale=True, colorbar=dict(x=0.28, len=0.9, title="phi-k"),
+    ), row=1, col=1)
+    fig.add_trace(go.Heatmap(
+        z=synth_mat, x=all_cols, y=all_cols, text=_fmt(synth_mat),
+        texttemplate="%{text}", **kw_assoc,
+    ), row=1, col=2)
+    fig.add_trace(go.Heatmap(
+        z=diff_mat, x=all_cols, y=all_cols, text=_fmt(diff_mat),
+        texttemplate="%{text}", zmin=0, zmax=1, colorscale="Reds",
+        showscale=True, colorbar=dict(x=1.0, len=0.9, title="|Δ|"),
+    ), row=1, col=3)
+
+    fig.update_layout(
+        title="Pairwise Correlation Difference — phi-k association matrices",
+        height=height,
+        margin=dict(l=60, r=60, t=70, b=40),
+    )
+    return fig
+
+
+def plot_contingency_tvd_heatmap(
+    pair_tvds: Dict[str, float],
+    all_cols: List[str],
+    col_types: Dict[str, str],
+    synth_label: str = "Synthetic",
+) -> go.Figure:
+    """
+    Single N×N heatmap of contingency TVD values.
+
+    Cells covering numerical×numerical pairs are left blank (NaN) since the
+    contingency metric only measures categorical and mixed pairs. The diagonal
+    is set to 0 (no divergence between a column and itself).
+    """
+    mat = _build_symmetric_matrix(pair_tvds, all_cols, diagonal=0.0)
+    fmt = [[f"{v:.3f}" if not np.isnan(v) else "" for v in row] for row in mat]
+
+    fig = go.Figure(go.Heatmap(
+        z=mat, x=all_cols, y=all_cols,
+        text=fmt, texttemplate="%{text}",
+        zmin=0, zmax=1, colorscale="Reds",
+        colorbar=dict(title="TVD"),
+    ))
+    fig.update_layout(
+        title=f"Contingency TVD (Real vs {synth_label})",
+        height=max(350, 40 * len(all_cols) + 100),
+        margin=dict(l=60, r=60, t=70, b=40),
+        yaxis=dict(autorange="reversed"),
+    )
+    return fig
+
+
 def plot_contingency_pair(
     real: pd.DataFrame,
     synthetic: pd.DataFrame,

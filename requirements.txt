@@ -6,3 +6,4 @@ plotly>=5.18
 streamlit>=1.30
 pyyaml>=6.0
 pyarrow>=14.0
+phik>=0.12

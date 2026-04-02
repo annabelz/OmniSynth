@@ -51,6 +51,7 @@ from stdg_eval.evaluation.scoring import (
     compute_missingness_score,
 )
 from stdg_eval.utils.data_utils import detect_column_types, load_dataset, load_config, validate_column_types, eval_config_from_dict
+from stdg_eval.utils.precomputed_io import load_precomputed
 from stdg_eval.visualization import plots as P
 
 
@@ -100,6 +101,9 @@ def _init_state():
         "fidelity_results": {},   # {name: FidelityResults}
         "missingness_results": {},  # {name: MissingnessResults}
         "evaluated": False,
+        # Precomputed bivariate/multivariate results loaded from JSON
+        # {synth_name: {group: {metric_key: MetricResult}}}
+        "precomputed_results": {},
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -141,10 +145,12 @@ def _sidebar():
         cfg_file = st.sidebar.file_uploader("Config file (.yaml or .txt)", type=["yaml", "yml", "txt"])
         if cfg_file:
             try:
-                import tempfile, pathlib
+                import hashlib, tempfile, pathlib
+                cfg_bytes = cfg_file.read()
+                cfg_hash = hashlib.md5(cfg_bytes).hexdigest()
                 suffix = pathlib.Path(cfg_file.name).suffix
                 with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                    tmp.write(cfg_file.read())
+                    tmp.write(cfg_bytes)
                     tmp_path = tmp.name
                 cfg = load_config(tmp_path)
                 os.unlink(tmp_path)
@@ -154,9 +160,19 @@ def _sidebar():
                 # Column type overrides from config
                 if "column_types" in cfg:
                     st.session_state["col_types"] = cfg["column_types"]
-                # Metric enable flags from config — set as session state defaults
-                # so that the sidebar checkboxes reflect them on next render
-                if "metrics" in cfg:
+                # Precomputed bivariate/multivariate results
+                if "precomputed_results" in cfg:
+                    try:
+                        st.session_state["precomputed_results"] = load_precomputed(
+                            cfg["precomputed_results"]
+                        )
+                    except Exception as exc:
+                        st.sidebar.warning(f"Could not load precomputed results: {exc}")
+                # Metric enable flags from config — only applied when a new config
+                # file is loaded (detected via content hash). After initial load the
+                # sidebar checkboxes are the source of truth and are not overwritten,
+                # so the user can freely toggle metrics that were disabled in the config.
+                if "metrics" in cfg and st.session_state.get("_config_hash") != cfg_hash:
                     eval_cfg = eval_config_from_dict(cfg)
                     fc = eval_cfg.fidelity
                     mc = eval_cfg.missingness
@@ -165,12 +181,14 @@ def _sidebar():
                     st.session_state["run_hd"] = fc.run_hellinger
                     st.session_state["run_spearman"] = fc.run_spearman
                     st.session_state["run_contingency"] = fc.run_contingency
+                    st.session_state["run_pcd"] = fc.run_pcd
                     st.session_state["run_cc"] = fc.run_cross_classification
                     st.session_state["run_pmse"] = fc.run_propensity_mse
                     st.session_state["run_miss_rate"] = mc.run_rate
                     st.session_state["run_miss_set"] = mc.run_set_distribution
                     st.session_state["run_miss_auroc"] = mc.run_classifier_auroc
                     st.session_state["run_miss_dep"] = mc.run_dependency_structure
+                st.session_state["_config_hash"] = cfg_hash
             except Exception as e:
                 st.sidebar.error(f"Failed to load config: {e}")
 
@@ -212,6 +230,34 @@ def _sidebar():
     st.sidebar.divider()
     st.sidebar.subheader("3 · Evaluate")
 
+    # Precomputed results upload (alternative / supplement to config reference)
+    with st.sidebar.expander("Precomputed results (optional)", expanded=False):
+        st.caption(
+            "Upload a JSON file produced by `stdg-eval precompute` to skip "
+            "recomputing expensive bivariate / multivariate metrics."
+        )
+        pre_file = st.file_uploader(
+            "Precomputed results (.json)", type=["json"], key="precomputed_upload"
+        )
+        if pre_file:
+            try:
+                import tempfile
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
+                    tmp.write(pre_file.read())
+                    tmp_path = tmp.name
+                st.session_state["precomputed_results"] = load_precomputed(tmp_path)
+                os.unlink(tmp_path)
+                n_synths = len(st.session_state["precomputed_results"])
+                st.success(f"Loaded precomputed results for {n_synths} dataset(s).")
+            except Exception as exc:
+                st.error(f"Failed to load precomputed results: {exc}")
+        elif st.session_state.get("precomputed_results"):
+            n_synths = len(st.session_state["precomputed_results"])
+            st.info(f"Using precomputed results for {n_synths} dataset(s) (loaded from config).")
+            if st.button("Clear precomputed results"):
+                st.session_state["precomputed_results"] = {}
+                st.rerun()
+
     with st.sidebar.expander("Metric options", expanded=False):
         run_uni = st.checkbox("Univariate", value=True, key="run_uni")
         run_wd = st.checkbox("↳ Wasserstein Distance", value=True, key="run_wd", disabled=not run_uni)
@@ -221,6 +267,7 @@ def _sidebar():
         run_bi = st.checkbox("Bivariate", value=True, key="run_bi")
         run_spearman = st.checkbox("↳ Spearman Correlation", value=True, key="run_spearman", disabled=not run_bi)
         run_contingency = st.checkbox("↳ Contingency Matrix", value=True, key="run_contingency", disabled=not run_bi)
+        run_pcd = st.checkbox("↳ Pairwise Correlation Difference", value=True, key="run_pcd", disabled=not run_bi)
 
         run_multi = st.checkbox("Multivariate", value=True, key="run_multi")
         run_cc = st.checkbox("↳ Cross-Classification", value=True, key="run_cc", disabled=not run_multi)
@@ -246,7 +293,7 @@ def _sidebar():
         _run_evaluation(
             run_uni, run_bi, run_multi, run_miss,
             run_wd, run_tvd, run_hd,
-            run_spearman, run_contingency,
+            run_spearman, run_contingency, run_pcd,
             run_cc, run_pmse,
             run_miss_rate, run_miss_set, run_miss_auroc, run_miss_dep,
         )
@@ -255,13 +302,14 @@ def _sidebar():
 def _run_evaluation(
     run_uni, run_bi, run_multi, run_miss,
     run_wd=True, run_tvd=True, run_hd=True,
-    run_spearman=True, run_contingency=True,
+    run_spearman=True, run_contingency=True, run_pcd=True,
     run_cc=True, run_pmse=True,
     run_miss_rate=True, run_miss_set=True, run_miss_auroc=True, run_miss_dep=True,
 ):
     real = st.session_state["real_df"]
     synths = st.session_state["synth_dfs"]
     col_types = st.session_state["col_types"]
+    precomputed = st.session_state.get("precomputed_results", {})
 
     fidelity_results = {}
     missingness_results = {}
@@ -280,15 +328,31 @@ def _run_evaluation(
 
     for i, (name, synth) in enumerate(synths.items()):
         progress.progress((i) / n, text=f"Evaluating {name}…")
+
+        # Determine which groups are already covered by precomputed results so
+        # we can skip their (potentially expensive) recomputation.
+        precomp = precomputed.get(name, {})
+        uni_precomputed = run_uni and bool(precomp.get("univariate"))
+        bi_precomputed = run_bi and bool(precomp.get("bivariate"))
+        multi_precomputed = run_multi and bool(precomp.get("multivariate"))
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             if run_uni or run_bi or run_multi:
                 res = evaluate_fidelity(
                     real, synth, col_types=col_types,
-                    run_univariate=run_uni,
-                    run_bivariate=run_bi,
-                    run_multivariate=run_multi,
+                    run_univariate=run_uni and not uni_precomputed,
+                    run_bivariate=run_bi and not bi_precomputed,
+                    run_multivariate=run_multi and not multi_precomputed,
                 )
+                # Inject precomputed groups into the result
+                if uni_precomputed:
+                    res.setdefault("univariate", {}).update(precomp["univariate"])
+                if bi_precomputed:
+                    res.setdefault("bivariate", {}).update(precomp["bivariate"])
+                if multi_precomputed:
+                    res.setdefault("multivariate", {}).update(precomp["multivariate"])
+
                 # Post-filter individual sub-metrics the user deselected
                 if "univariate" in res:
                     if not run_wd:
@@ -304,6 +368,8 @@ def _run_evaluation(
                         res["bivariate"].pop("spearman", None)
                     if not run_contingency:
                         res["bivariate"].pop("contingency", None)
+                    if not run_pcd:
+                        res["bivariate"].pop("pcd", None)
                     if not res["bivariate"]:
                         del res["bivariate"]
                 if "multivariate" in res:
@@ -360,7 +426,7 @@ def _weight_controls():
 
     # A fidelity group only contributes if it has at least one sub-metric enabled
     uni_active = run_uni and (ss.get("run_wd", True) or ss.get("run_tvd", True) or ss.get("run_hd", True))
-    bi_active = run_bi and (ss.get("run_spearman", True) or ss.get("run_contingency", True))
+    bi_active = run_bi and (ss.get("run_spearman", True) or ss.get("run_contingency", True) or ss.get("run_pcd", True))
     multi_active = run_multi and (ss.get("run_cc", True) or ss.get("run_pmse", True))
     has_fidelity = uni_active or bi_active or multi_active
 
@@ -389,7 +455,8 @@ def _weight_controls():
                         st.slider("↳ Hellinger", 0.0, 1.0, 1.0, 0.01, key="w_hd_metric")
                 if bi_active:
                     st.slider("Bivariate", 0.0, 1.0, DEFAULT_FIDELITY_WEIGHTS[1], 0.01, key="w_bi")
-                    st.caption(_fidelity_sub_label("run_spearman", "Spearman", "run_contingency", "Contingency"))
+                    active_bi = [l for k, l in [("run_spearman", "Spearman"), ("run_contingency", "Contingency"), ("run_pcd", "PCD")] if ss.get(k, True)]
+                    st.caption("Includes: " + " + ".join(active_bi) if active_bi else "")
                 if multi_active:
                     st.slider("Multivariate", 0.0, 1.0, DEFAULT_FIDELITY_WEIGHTS[2], 0.01, key="w_multi")
                     st.caption(_fidelity_sub_label("run_cc", "Cross-class", "run_pmse", "pMSE"))
@@ -442,7 +509,7 @@ def _get_weights() -> tuple:
     run_miss = ss.get("run_miss", True)
 
     uni_active = run_uni and (ss.get("run_wd", True) or ss.get("run_tvd", True) or ss.get("run_hd", True))
-    bi_active = run_bi and (ss.get("run_spearman", True) or ss.get("run_contingency", True))
+    bi_active = run_bi and (ss.get("run_spearman", True) or ss.get("run_contingency", True) or ss.get("run_pcd", True))
     multi_active = run_multi and (ss.get("run_cc", True) or ss.get("run_pmse", True))
 
     miss_rate_active = run_miss and ss.get("run_miss_rate", True)
@@ -611,10 +678,13 @@ def _tab_individual():
         with st.expander("Bivariate associations", expanded=True):
             sp_res = fid_res["bivariate"].get("spearman")
             ct_res = fid_res["bivariate"].get("contingency")
+            pcd_res = fid_res["bivariate"].get("pcd")
+
+            col_types = st.session_state.get("col_types") or {}
+            all_cols = list(col_types.keys())
 
             if sp_res and "columns" in sp_res.details:
-                st.markdown("**Spearman correlation matrices**")
-                ncols = sp_res.details["columns"]
+                st.markdown("**Spearman correlation** (numerical columns)")
                 real_corr = pd.DataFrame(sp_res.details["real_correlation_matrix"])
                 synth_corr = pd.DataFrame(sp_res.details["synth_correlation_matrix"])
                 fig = P.plot_correlation_heatmaps(real_corr, synth_corr, synth_label=selected)
@@ -622,13 +692,30 @@ def _tab_individual():
                 st.caption(f"Mean |Δ| = {sp_res.details.get('mean_absolute_difference', 0):.4f}  |  Score: {sp_res.score:.3f}")
 
             if ct_res and ct_res.details.get("pair_tvds"):
-                st.markdown("**Contingency table TVD per pair** (top-20 most divergent)")
+                st.markdown("**Contingency TVD** (categorical and mixed pairs)")
                 pair_tvds = ct_res.details["pair_tvds"]
-                top_pairs = sorted(pair_tvds.items(), key=lambda x: -x[1])[:20]
-                pair_df = pd.DataFrame(top_pairs, columns=["Pair", "TVD"])
-                pair_df["Score"] = 1 - pair_df["TVD"]
-                st.dataframe(pair_df.style.format({"TVD": "{:.4f}", "Score": "{:.4f}"}),
-                             use_container_width=True)
+                fig = P.plot_contingency_tvd_heatmap(
+                    pair_tvds, all_cols, col_types, synth_label=selected
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption(f"Mean TVD = {float(np.mean(list(pair_tvds.values()))):.4f}  |  Score: {ct_res.score:.3f}")
+
+            if pcd_res and pcd_res.details.get("pair_differences"):
+                st.markdown("**Pairwise Correlation Difference** (phi-k, all columns)")
+                fig = P.plot_pcd_heatmaps(
+                    pcd_res.details.get("pair_real", {}),
+                    pcd_res.details.get("pair_synth", {}),
+                    pcd_res.details["pair_differences"],
+                    all_cols,
+                    synth_label=selected,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption(
+                    f"Mean |Δ| = {pcd_res.details.get('mean_absolute_difference', 0):.4f}  |  "
+                    f"Score: {pcd_res.score:.3f}  |  "
+                    f"t-test p = {pcd_res.details.get('p_value', float('nan')):.4f}"
+                    + ("  ✱ significant" if pcd_res.details.get("significant_difference") else "")
+                )
 
     # ------------------------------------------------------------------
     # Multivariate
@@ -979,6 +1066,27 @@ def _tab_score_summary():
                 row[name] = f"{score:.4f}" if score is not None else "—"
             rows.append(row)
 
+    # --- Per-pair rows for PCD ---
+    if any("bivariate" in fid_all.get(n, {}) and "pcd" in fid_all.get(n, {})["bivariate"] for n in run_names):
+        all_pairs = set()
+        for name in run_names:
+            res = fid_all.get(name, {}).get("bivariate", {}).get("pcd")
+            if res:
+                all_pairs.update(res.details.get("pair_differences", {}).keys())
+        for pair in sorted(all_pairs):
+            col1, col2 = pair.split("|")
+            row = {
+                "Metric": "Pairwise Correlation Difference",
+                "Variable": f"{col1} x {col2}",
+                "Metric weight (in univariate)": "—",
+            }
+            for name in run_names:
+                res = fid_all.get(name, {}).get("bivariate", {}).get("pcd")
+                diff = res.details.get("pair_differences", {}).get(pair) if res else None
+                score = (1.0 - diff) if diff is not None else None
+                row[name] = f"{score:.4f}" if score is not None else "—"
+            rows.append(row)
+
     # --- Per-pair rows for Contingency (pair score = 1 - TVD) ---
     if any("bivariate" in fid_all.get(n, {}) and "contingency" in fid_all.get(n, {})["bivariate"] for n in run_names):
         all_pairs = set()
@@ -1178,6 +1286,12 @@ def _tab_metric_correlation():
         pair_tvds = ct_res.details.get("pair_tvds", {})
         metric_vectors["Contingency (pairs)"] = {k: 1.0 - v for k, v in pair_tvds.items()}
 
+    # PCD — per pair score = 1 - |diff|
+    pcd_res = bi.get("pcd")
+    if pcd_res:
+        pcd_diffs = pcd_res.details.get("pair_differences", {})
+        metric_vectors["PCD (pairs)"] = {k: 1.0 - v for k, v in pcd_diffs.items()}
+
     if len(metric_vectors) < 2:
         st.info("Need at least 2 metrics with per-variable scores to compute correlations.")
     else:
@@ -1247,6 +1361,7 @@ def _tab_metric_correlation():
         for group, mkey, label in [
             ("bivariate", "spearman", "Spearman"),
             ("bivariate", "contingency", "Contingency"),
+            ("bivariate", "pcd", "PCD"),
             ("multivariate", "cross_classification", "Cross-classification"),
             ("multivariate", "propensity_mse", "Propensity MSE"),
         ]:

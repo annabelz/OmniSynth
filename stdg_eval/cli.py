@@ -8,6 +8,11 @@ stdg-eval dashboard [--config PATH] [--port PORT]
 
 stdg-eval evaluate --real PATH --synth PATH [PATH ...] [--output PATH]
     Run evaluation headlessly and write results to a JSON file.
+
+stdg-eval precompute --config PATH --output PATH [--groups bivariate multivariate]
+    Run only the expensive bivariate / multivariate fidelity metrics and save
+    results to a JSON file that the dashboard can load directly, skipping
+    recomputation.
 """
 
 from __future__ import annotations
@@ -64,10 +69,11 @@ def _cmd_evaluate(args):
     for name, synth_path in synth_entries:
         synth = pd.read_csv(synth_path)
 
+        print(f"\n[{name}]")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            fid = evaluate_fidelity(real, synth, col_types=col_types)
-            miss = evaluate_missingness(real, synth, col_types=col_types)
+            fid = evaluate_fidelity(real, synth, col_types=col_types, verbose=True)
+            miss = evaluate_missingness(real, synth, col_types=col_types, verbose=True)
 
         f_scores = compute_fidelity_score(fid)
         m_scores = compute_missingness_score(miss)
@@ -91,6 +97,57 @@ def _cmd_evaluate(args):
         out = Path(args.output)
         out.write_text(json.dumps(results, indent=2))
         print(f"\nResults saved to {out}")
+
+
+def _cmd_precompute(args):
+    import pandas as pd
+    from stdg_eval.evaluation.fidelity import evaluate_fidelity
+    from stdg_eval.utils.data_utils import load_config, eval_config_from_dict
+    from stdg_eval.utils.precomputed_io import save_precomputed
+
+    cfg = load_config(args.config)
+    real = pd.read_csv(cfg["real_data"])
+    synth_entries = [(e["name"], e["path"]) for e in cfg.get("synthetic_datasets", [])]
+    col_types = cfg.get("column_types") or None
+
+    groups = tuple(args.groups)
+    run_uni = "univariate" in groups
+    run_bi = "bivariate" in groups
+    run_multi = "multivariate" in groups
+
+    eval_cfg = eval_config_from_dict(cfg) if "metrics" in cfg else None
+
+    fidelity_results = {}
+    n = len(synth_entries)
+    for i, (name, synth_path) in enumerate(synth_entries):
+        print(f"\n[{i + 1}/{n}] {name}", flush=True)
+        synth = pd.read_csv(synth_path)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res = evaluate_fidelity(
+                real, synth,
+                col_types=col_types,
+                config=eval_cfg,
+                run_univariate=run_uni,
+                run_bivariate=run_bi,
+                run_multivariate=run_multi,
+                verbose=True,
+            )
+        fidelity_results[name] = res
+        score_parts = []
+        for group in groups:
+            if group in res:
+                scores = [mr.score for mr in res[group].values()]
+                if scores:
+                    score_parts.append(f"{group}={sum(scores)/len(scores):.4f}")
+        print(f"  → {', '.join(score_parts)}")
+
+    out = Path(args.output)
+    save_precomputed(fidelity_results, out, groups=groups)
+    print(f"\nPrecomputed results saved to {out}")
+    print("Reference in your config with:")
+    print(f"  precomputed_results: {out}")
 
 
 def main():
@@ -117,11 +174,28 @@ def main():
     eval_p.add_argument("--output", type=Path, default=None,
                         help="Where to write JSON results (optional).")
 
+    # precompute sub-command
+    pre_p = sub.add_parser(
+        "precompute",
+        help="Run expensive bivariate/multivariate metrics and save to JSON for dashboard reuse.",
+    )
+    pre_p.add_argument("--config", type=Path, required=True,
+                       help="Path to a YAML config file.")
+    pre_p.add_argument("--output", type=Path, required=True,
+                       help="Where to write the precomputed JSON file.")
+    pre_p.add_argument(
+        "--groups", nargs="+", default=["univariate", "bivariate", "multivariate"],
+        choices=["univariate", "bivariate", "multivariate"],
+        help="Which metric groups to precompute (default: all).",
+    )
+
     args = parser.parse_args()
 
     if args.command == "dashboard":
         _cmd_dashboard(args)
     elif args.command == "evaluate":
         _cmd_evaluate(args)
+    elif args.command == "precompute":
+        _cmd_precompute(args)
     else:
         parser.print_help()

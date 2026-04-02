@@ -30,6 +30,7 @@ def evaluate_missingness(
     run_set_distribution: bool = True,
     run_classifier_auroc: bool = True,
     run_dependency_structure: bool = True,
+    verbose: bool = False,
 ) -> MissingnessResults:
     """
     Evaluate all missingness similarity metrics comparing *real* to *synthetic*.
@@ -61,15 +62,22 @@ def evaluate_missingness(
 
     results: MissingnessResults = {}
 
+    def _log(label: str) -> None:
+        if verbose:
+            print(f"  [missingness] {label}", flush=True)
+
     if run_rate and mc.run_rate:
+        _log("Rate")
         results["rate"] = MissingnessRate().evaluate(real, synthetic, col_types)
 
     if run_set_distribution and mc.run_set_distribution:
+        _log("Set Distribution")
         results["set_distribution"] = MissingnessSetDistribution().evaluate(
             real, synthetic, col_types
         )
 
     if run_classifier_auroc and mc.run_classifier_auroc:
+        _log("Classifier AUROC")
         results["classifier_auroc"] = MissingnessClassifierAUROC(
             model=mc.classifier_model,
             max_iter=mc.classifier_max_iter,
@@ -79,6 +87,7 @@ def evaluate_missingness(
         ).evaluate(real, synthetic, col_types)
 
     if run_dependency_structure and mc.run_dependency_structure:
+        _log("Dependency Structure")
         results["dependency_structure"] = MissingnessDependencyStructure(
             method=mc.dependency_method
         ).evaluate(real, synthetic, col_types)

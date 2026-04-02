@@ -14,7 +14,7 @@ import pandas as pd
 from stdg_eval.config import DEFAULT_CONFIG, EvalConfig
 from stdg_eval.metrics.base import MetricResult
 from stdg_eval.metrics.fidelity.univariate import WassersteinDistance, TotalVariationDistance, HellingerDistance
-from stdg_eval.metrics.fidelity.bivariate import SpearmanCorrelation, ContingencyMatrix
+from stdg_eval.metrics.fidelity.bivariate import SpearmanCorrelation, ContingencyMatrix, PairwiseCorrelationDifference
 from stdg_eval.metrics.fidelity.multivariate import CrossClassification, PropensityMSE
 from stdg_eval.utils.data_utils import ColumnTypes, align_columns, detect_column_types
 
@@ -33,6 +33,7 @@ def evaluate_fidelity(
     run_univariate: bool = True,
     run_bivariate: bool = True,
     run_multivariate: bool = True,
+    verbose: bool = False,
 ) -> FidelityResults:
     """
     Evaluate all fidelity metrics comparing *real* to *synthetic*.
@@ -67,6 +68,10 @@ def evaluate_fidelity(
 
     results: FidelityResults = {}
 
+    def _log(label: str) -> None:
+        if verbose:
+            print(f"  [fidelity] {label}", flush=True)
+
     # ------------------------------------------------------------------
     # Univariate
     # ------------------------------------------------------------------
@@ -74,10 +79,13 @@ def evaluate_fidelity(
         results["univariate"] = {}
 
         if fc.run_wasserstein:
+            _log("Wasserstein Distance")
             results["univariate"]["wasserstein"] = WassersteinDistance().evaluate(real, synthetic, col_types)
         if fc.run_tvd:
+            _log("Total Variation Distance")
             results["univariate"]["tvd"] = TotalVariationDistance().evaluate(real, synthetic, col_types)
         if fc.run_hellinger:
+            _log("Hellinger Distance")
             results["univariate"]["hellinger"] = HellingerDistance().evaluate(real, synthetic, col_types)
 
     # ------------------------------------------------------------------
@@ -87,11 +95,16 @@ def evaluate_fidelity(
         results["bivariate"] = {}
 
         if fc.run_spearman:
+            _log("Spearman Correlation")
             results["bivariate"]["spearman"] = SpearmanCorrelation().evaluate(real, synthetic, col_types)
         if fc.run_contingency:
+            _log("Contingency Matrix")
             results["bivariate"]["contingency"] = ContingencyMatrix(
                 max_categories=fc.contingency_max_categories
             ).evaluate(real, synthetic, col_types)
+        if fc.run_pcd:
+            _log("Pairwise Correlation Difference (phik)")
+            results["bivariate"]["pcd"] = PairwiseCorrelationDifference().evaluate(real, synthetic, col_types)
 
     # ------------------------------------------------------------------
     # Multivariate
@@ -100,6 +113,7 @@ def evaluate_fidelity(
         results["multivariate"] = {}
 
         if fc.run_cross_classification:
+            _log("Cross-Classification")
             results["multivariate"]["cross_classification"] = CrossClassification(
                 model=fc.propensity_mse_model,
                 n_estimators=fc.cross_classification_n_estimators,
@@ -107,6 +121,7 @@ def evaluate_fidelity(
                 random_state=cfg.random_state,
             ).evaluate(real, synthetic, col_types)
         if fc.run_propensity_mse:
+            _log("Propensity MSE")
             results["multivariate"]["propensity_mse"] = PropensityMSE(
                 model=fc.propensity_mse_model,
                 n_estimators=fc.propensity_mse_n_estimators,

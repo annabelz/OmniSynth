@@ -17,6 +17,12 @@ synthetic_datasets:
   - name: synth3
     path: data/synth3.csv
 
+# Optional: path to precomputed fidelity results (JSON).
+# Generate with:  stdg-eval precompute --config this_config.yaml --output precomputed.json
+# When present, the dashboard loads these results directly and skips recomputing
+# all fidelity metrics (univariate, bivariate, multivariate).
+# precomputed_results: precomputed.json
+
 # Optional: override automatic column type inference
 # column_types:
 #   age: numerical
@@ -33,6 +39,7 @@ synthetic_datasets:
 #   # Bivariate
 #   spearman: true
 #   contingency: true
+#   pairwise_correlation_difference: true
 #   # Multivariate
 #   cross_classification: true
 #   propensity_mse: true

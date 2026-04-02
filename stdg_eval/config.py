@@ -66,6 +66,7 @@ class FidelityConfig:
     # Bivariate — metric enable flags
     run_spearman: bool = True
     run_contingency: bool = True
+    run_pcd: bool = True
 
     # Bivariate — metric settings
     spearman_method: Literal["spearman", "pearson"] = "spearman"

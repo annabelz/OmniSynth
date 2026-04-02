@@ -3,7 +3,7 @@ Bivariate fidelity metrics.
 
 SpearmanCorrelation        — numerical × numerical pairwise rank correlations
 ContingencyMatrix          — categorical × categorical (and mixed) associations
-PairwiseCorrelationDifference — TODO
+PairwiseCorrelationDifference — phik-based mixed-type correlation difference + t-test
 """
 
 from __future__ import annotations
@@ -231,20 +231,37 @@ class ContingencyMatrix(BaseMetric):
 
 class PairwiseCorrelationDifference(BaseMetric):
     """
-    TODO: Implement pairwise correlation difference metric.
+    Pairwise Correlation Difference (PCD) as per Hernandez et al. (2025).
 
-    Planned approach:
-    - Compute full pairwise correlation matrices for real and synthetic data
-      using a mixed-type correlation measure (e.g., Spearman for numerical,
-      Cramér's V for categorical, point-biserial for mixed pairs).
-    - Score = 1 − mean absolute difference across all pairs.
+    Uses the phi-k (phik) correlation coefficient introduced by Baak et al. to
+    compute a unified correlation matrix for mixed-type data (numerical and
+    categorical).  phi-k:
 
-    This will supersede the separate SpearmanCorrelation and ContingencyMatrix
-    metrics once a unified mixed-type correlation measure is implemented.
+    - Works consistently across categorical and numerical variable pairs.
+    - Captures non-linear relationships.
+    - Reduces to the Pearson correlation coefficient for bivariate normal inputs.
+
+    PCD is computed as the mean absolute difference between the upper-triangular
+    (off-diagonal) entries of the real and synthetic phik correlation matrices::
+
+        PCD = (1/n) * sum_i |Corr(X_real)_i - Corr(X_synth)_i|
+
+    A low PCD (close to 0) indicates that the synthetic data preserves pairwise
+    correlations well; a high PCD (close to 1) indicates strong disagreement.
+
+    The metric is complemented by a one-sample Student's t-test (alpha=0.05)
+    on the vector of absolute differences to determine whether the deviation
+    from zero is statistically significant.
+
+    Score = 1 - PCD  (higher is better).
     """
 
     name = "Pairwise Correlation Difference"
-    description = "TODO: Mixed-type pairwise correlation difference (not yet implemented)."
+    description = (
+        "Mean absolute difference between real and synthetic phik correlation "
+        "matrices (mixed-type: numerical and categorical columns). "
+        "Complemented by Student's t-test (alpha=0.05)."
+    )
     axis = "fidelity"
 
     def evaluate(
@@ -253,7 +270,85 @@ class PairwiseCorrelationDifference(BaseMetric):
         synthetic: pd.DataFrame,
         col_types: ColumnTypes,
     ) -> MetricResult:
-        raise NotImplementedError(
-            "PairwiseCorrelationDifference is not yet implemented. "
-            "See class docstring for the planned approach."
+        import phik as phik_lib
+        from scipy.stats import ttest_1samp
+
+        num_cols = get_numerical_columns(col_types)
+        all_cols = list(col_types.keys())
+
+        if len(all_cols) < 2:
+            return MetricResult(
+                metric_name=self.name,
+                score=1.0,
+                details={"message": "Fewer than 2 columns - no pairs to compare."},
+            )
+
+        # Compute phik correlation matrices (values in [0, 1])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            real_phik = phik_lib.phik_matrix(
+                real[all_cols], interval_cols=num_cols, verbose=False, njobs=1
+            )
+            synth_phik = phik_lib.phik_matrix(
+                synthetic[all_cols], interval_cols=num_cols, verbose=False, njobs=1
+            )
+
+        # Reindex both to the same column order
+        real_phik = real_phik.reindex(index=all_cols, columns=all_cols)
+        synth_phik = synth_phik.reindex(index=all_cols, columns=all_cols)
+
+        n = len(all_cols)
+        idx = np.triu_indices(n, k=1)
+        real_upper = real_phik.values[idx]
+        synth_upper = synth_phik.values[idx]
+
+        # Filter out NaN pairs
+        valid_mask = ~(np.isnan(real_upper) | np.isnan(synth_upper))
+        real_valid = real_upper[valid_mask]
+        synth_valid = synth_upper[valid_mask]
+        diffs_valid = np.abs(real_valid - synth_valid)
+
+        if len(diffs_valid) == 0:
+            return MetricResult(
+                metric_name=self.name,
+                score=1.0,
+                details={"message": "No valid column pairs found."},
+            )
+
+        pcd = float(np.mean(diffs_valid))
+
+        # Student's t-test: H0 = mean difference is 0
+        if len(diffs_valid) >= 2:
+            t_stat, p_value = ttest_1samp(diffs_valid, 0.0)
+            t_stat = float(t_stat)
+            p_value = float(p_value)
+            significant = p_value < 0.05
+        else:
+            t_stat, p_value, significant = float("nan"), float("nan"), None
+
+        # Build labelled per-pair dicts
+        pair_real: Dict[str, float] = {}
+        pair_synth: Dict[str, float] = {}
+        pair_diffs: Dict[str, float] = {}
+        valid_indices = np.where(valid_mask)[0]
+        for vi, k in enumerate(valid_indices):
+            i, j = idx[0][k], idx[1][k]
+            key = f"{all_cols[i]}|{all_cols[j]}"
+            pair_real[key] = float(real_valid[vi])
+            pair_synth[key] = float(synth_valid[vi])
+            pair_diffs[key] = float(diffs_valid[vi])
+
+        return MetricResult(
+            metric_name=self.name,
+            score=max(0.0, 1.0 - pcd),
+            details={
+                "pcd": pcd,
+                "pair_real": pair_real,
+                "pair_synth": pair_synth,
+                "pair_differences": pair_diffs,
+                "mean_absolute_difference": pcd,
+                "t_statistic": t_stat,
+                "p_value": p_value,
+                "significant_difference": significant,
+            },
         )
