@@ -99,7 +99,8 @@ class ContingencyMatrix(BaseMetric):
 
     Handles three pair types:
     - categorical × categorical: normalised contingency TVD
-    - numerical × categorical (mixed): bin the numerical column and compute TVD
+    - numerical × categorical (mixed): bin the numerical column (Scott's rule on
+      pooled real + synthetic values) and compute TVD
     - numerical × numerical: skipped (handled by SpearmanCorrelation)
 
     Score = 1 − mean(TVD across all qualifying column pairs).
@@ -112,8 +113,7 @@ class ContingencyMatrix(BaseMetric):
     )
     axis = "fidelity"
 
-    def __init__(self, n_bins: int = 10, max_categories: int = 30) -> None:
-        self.n_bins = n_bins
+    def __init__(self, max_categories: int = 30) -> None:
         self.max_categories = max_categories
 
     def evaluate(
@@ -190,6 +190,26 @@ class ContingencyMatrix(BaseMetric):
         tvd = 0.5 * float(np.sum(np.abs(r_ct.values - s_ct.values)))
         return tvd
 
+    @staticmethod
+    def _scott_bin_edges(real_col: pd.Series, synth_col: pd.Series) -> np.ndarray:
+        """
+        Bin edges for a numerical column using Scott's rule on the pooled
+        (real + synthetic) non-missing values, spanning the combined range.
+        """
+        pooled = pd.concat([real_col, synth_col], ignore_index=True).dropna().values
+        if len(pooled) < 2:
+            return np.array([-np.inf, np.inf])
+        std = float(np.std(pooled, ddof=1))
+        if std == 0.0:
+            return np.array([-np.inf, np.inf])
+        h = 3.5 * std * (len(pooled) ** (-1.0 / 3.0))
+        lo, hi = float(pooled.min()), float(pooled.max())
+        n_bins = max(1, int(np.ceil((hi - lo) / h)))
+        edges = np.linspace(lo, hi, n_bins + 1)
+        edges[0] = -np.inf
+        edges[-1] = np.inf
+        return edges
+
     def _mixed_tvd(
         self,
         real: pd.DataFrame,
@@ -197,19 +217,16 @@ class ContingencyMatrix(BaseMetric):
         num_col: str,
         cat_col: str,
     ) -> Optional[float]:
-        """TVD after binning the numerical column into ``n_bins`` equal-frequency bins."""
+        """TVD after binning the numerical column using Scott's rule on pooled data."""
         r = real[[num_col, cat_col]].dropna()
         s = synthetic[[num_col, cat_col]].dropna()
         if len(r) == 0 or len(s) == 0:
             return None
 
-        # Derive bin edges from real data
-        _, bin_edges = pd.qcut(r[num_col], q=self.n_bins, retbins=True, duplicates="drop")
-        bin_edges[0] = -np.inf
-        bin_edges[-1] = np.inf
+        bin_edges = self._scott_bin_edges(r[num_col], s[num_col])
 
-        r_binned = pd.cut(r[num_col], bins=bin_edges)
-        s_binned = pd.cut(s[num_col], bins=bin_edges)
+        r_binned = pd.cut(r[num_col], bins=bin_edges, include_lowest=True)
+        s_binned = pd.cut(s[num_col], bins=bin_edges, include_lowest=True)
 
         all_bins = sorted(set(r_binned.unique()) | set(s_binned.unique()), key=str)
         all_cats = sorted(set(r[cat_col].unique()) | set(s[cat_col].unique()), key=str)
@@ -283,14 +300,30 @@ class PairwiseCorrelationDifference(BaseMetric):
                 details={"message": "Fewer than 2 columns - no pairs to compare."},
             )
 
+        # Build shared bin edges for numerical columns using Scott's rule on the
+        # pooled (real + synthetic) values, so both datasets are binned on the
+        # same grid and the resulting phi-k values are directly comparable.
+        bins: dict = {}
+        for col in num_cols:
+            pooled = pd.concat([real[col], synthetic[col]], ignore_index=True).dropna().values
+            if len(pooled) < 2:
+                continue
+            std = float(np.std(pooled, ddof=1))
+            if std == 0.0:
+                continue
+            h = 3.49 * std * (len(pooled) ** (-1.0 / 3.0))
+            lo, hi = float(pooled.min()), float(pooled.max())
+            n_bins = max(1, int(np.ceil((hi - lo) / h)))
+            bins[col] = np.linspace(lo, hi, n_bins + 1)
+
         # Compute phik correlation matrices (values in [0, 1])
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             real_phik = phik_lib.phik_matrix(
-                real[all_cols], interval_cols=num_cols, verbose=False, njobs=1
+                real[all_cols], interval_cols=num_cols, bins=bins, verbose=False, njobs=1
             )
             synth_phik = phik_lib.phik_matrix(
-                synthetic[all_cols], interval_cols=num_cols, verbose=False, njobs=1
+                synthetic[all_cols], interval_cols=num_cols, bins=bins, verbose=False, njobs=1
             )
 
         # Reindex both to the same column order
