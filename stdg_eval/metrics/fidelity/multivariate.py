@@ -537,5 +537,11 @@ class CrossClassification(BaseMetric):
 
 
 # Convenience aliases
-CrossClassificationRS = lambda **kw: CrossClassification(mode="RS", **kw)
-CrossClassificationSR = lambda **kw: CrossClassification(mode="SR", **kw)
+class CrossClassificationRS(CrossClassification):
+    def __init__(self, **kw):
+        super().__init__(mode="RS", **kw)
+
+
+class CrossClassificationSR(CrossClassification):
+    def __init__(self, **kw):
+        super().__init__(mode="SR", **kw)
