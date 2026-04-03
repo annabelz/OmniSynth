@@ -15,7 +15,7 @@ from stdg_eval.config import DEFAULT_CONFIG, EvalConfig
 from stdg_eval.metrics.base import MetricResult
 from stdg_eval.metrics.fidelity.univariate import WassersteinDistance, TotalVariationDistance, HellingerDistance
 from stdg_eval.metrics.fidelity.bivariate import SpearmanCorrelation, ContingencyMatrix, PairwiseCorrelationDifference
-from stdg_eval.metrics.fidelity.multivariate import CrossClassification, PropensityMSE
+from stdg_eval.metrics.fidelity.multivariate import AucRoc, PropensityMSE, CrossClassificationRS, CrossClassificationSR
 from stdg_eval.utils.data_utils import ColumnTypes, align_columns, detect_column_types
 
 
@@ -59,7 +59,7 @@ def evaluate_fidelity(
         Nested dict:
         ``{"univariate": {"wasserstein": MetricResult, "tvd": MetricResult},
            "bivariate":   {"spearman": MetricResult, "contingency": MetricResult},
-           "multivariate": {"cross_classification": MetricResult, "propensity_mse": MetricResult}}``
+           "multivariate": {"auc_roc": MetricResult, "propensity_mse": MetricResult}}``
     """
     cfg = config or DEFAULT_CONFIG
     fc = cfg.fidelity
@@ -112,13 +112,14 @@ def evaluate_fidelity(
     if run_multivariate:
         results["multivariate"] = {}
 
-        if fc.run_cross_classification:
+        if fc.run_auc_roc:
             _log("Cross-Classification")
-            results["multivariate"]["cross_classification"] = CrossClassification(
+            results["multivariate"]["auc_roc"] = AucRoc(
                 model=fc.propensity_mse_model,
-                n_estimators=fc.cross_classification_n_estimators,
-                cv_folds=fc.cross_classification_cv_folds,
+                n_estimators=fc.auc_roc_n_estimators,
+                cv_folds=fc.auc_roc_cv_folds,
                 random_state=cfg.random_state,
+                impute=fc.auc_roc_impute,
             ).evaluate(real, synthetic, col_types)
         if fc.run_propensity_mse:
             _log("Propensity MSE")
@@ -127,6 +128,22 @@ def evaluate_fidelity(
                 n_estimators=fc.propensity_mse_n_estimators,
                 max_iter=fc.propensity_mse_max_iter,
                 random_state=cfg.random_state,
+            ).evaluate(real, synthetic, col_types)
+        if fc.run_crcl_rs:
+            _log("CrCl-RS (train real, test synth)")
+            results["multivariate"]["crcl_rs"] = CrossClassificationRS(
+                test_size=fc.crcl_test_size,
+                max_depth=fc.crcl_max_depth,
+                random_state=cfg.random_state,
+                impute=fc.crcl_impute,
+            ).evaluate(real, synthetic, col_types)
+        if fc.run_crcl_sr:
+            _log("CrCl-SR (train synth, test real)")
+            results["multivariate"]["crcl_sr"] = CrossClassificationSR(
+                test_size=fc.crcl_test_size,
+                max_depth=fc.crcl_max_depth,
+                random_state=cfg.random_state,
+                impute=fc.crcl_impute,
             ).evaluate(real, synthetic, col_types)
 
     return results

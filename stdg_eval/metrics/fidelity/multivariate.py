@@ -1,7 +1,7 @@
 """
 Multivariate fidelity metrics.
 
-CrossClassification  — discriminator AUROC (can real be told apart from synthetic?)
+AucRoc  — discriminator AUROC (can real be told apart from synthetic?)
 PropensityMSE        — propensity score MSE
 """
 # TODO: revise the implementation 
@@ -15,9 +15,11 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_val_score
+from sklearn.metrics import accuracy_score, r2_score
+from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_val_score, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 from stdg_eval.metrics.base import BaseMetric, MetricResult
 from stdg_eval.utils.data_utils import ColumnTypes
@@ -27,24 +29,36 @@ from stdg_eval.utils.data_utils import ColumnTypes
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-# TODO: should i be imputing for fidelity or should i do complete case analysis?
-
-def _encode_for_sklearn(df: pd.DataFrame, col_types: ColumnTypes) -> pd.DataFrame:
+def _encode_for_sklearn(
+    df: pd.DataFrame,
+    col_types: ColumnTypes,
+    impute: bool = False,
+) -> pd.DataFrame:
     """
-    One-hot encode categorical columns and impute missing values so the DataFrame
-    can be passed to scikit-learn estimators.
+    One-hot encode categorical columns and prepare the DataFrame for sklearn.
+
+    Parameters
+    ----------
+    impute:
+        If True, impute missing values (median for numerical, ``"__missing__"``
+        category for categorical) before encoding.
+        If False (default), perform complete case analysis: rows with any NaN
+        are dropped before encoding.
     """
     out = df.copy()
-    for col, ctype in col_types.items():
-        if col not in out.columns:
-            continue
-        if ctype == "categorical":
-            out[col] = out[col].astype(str).fillna("__missing__")
-        else:
-            median = out[col].median()
-            out[col] = out[col].fillna(median)
 
-    # One-hot encode all object/category columns
+    if impute:
+        for col, ctype in col_types.items():
+            if col not in out.columns:
+                continue
+            if ctype == "categorical":
+                out[col] = out[col].astype(str).fillna("__missing__")
+            else:
+                out[col] = out[col].fillna(out[col].median())
+    else:
+        out = out.dropna()
+
+    # One-hot encode categorical columns
     cat_cols = [c for c in out.columns if col_types.get(c) == "categorical"]
     if cat_cols:
         out = pd.get_dummies(out, columns=cat_cols, drop_first=False)
@@ -53,10 +67,10 @@ def _encode_for_sklearn(df: pd.DataFrame, col_types: ColumnTypes) -> pd.DataFram
 
 
 # ---------------------------------------------------------------------------
-# CrossClassification
+# AucRoc
 # ---------------------------------------------------------------------------
 
-class CrossClassification(BaseMetric):
+class AucRoc(BaseMetric):
     """
     Train a discriminator to distinguish real from synthetic samples.
 
@@ -75,9 +89,9 @@ class CrossClassification(BaseMetric):
     so score = 1 when AUROC = 0.5 and score = 0 when AUROC = 1.0.
     """
 
-    name = "Cross-Classification"
+    name = "AUC-ROC"
     description = (
-        "Discriminator AUROC: a classifier is trained to distinguish real from "
+        "Discriminator AUC-ROC: a classifier is trained to distinguish real from "
         "synthetic samples. Score = 1 when AUROC = 0.5 (indistinguishable)."
     )
     axis = "fidelity"
@@ -88,11 +102,13 @@ class CrossClassification(BaseMetric):
         n_estimators: int = 100,
         cv_folds: int = 5,
         random_state: int = 42,
+        impute: bool = False,
     ) -> None:
         self.model = model
         self.n_estimators = n_estimators
         self.cv_folds = cv_folds
         self.random_state = random_state
+        self.impute = impute
 
     def evaluate(
         self,
@@ -100,8 +116,8 @@ class CrossClassification(BaseMetric):
         synthetic: pd.DataFrame,
         col_types: ColumnTypes,
     ) -> MetricResult:
-        r_enc = _encode_for_sklearn(real, col_types)
-        s_enc = _encode_for_sklearn(synthetic, col_types)
+        r_enc = _encode_for_sklearn(real, col_types, impute=self.impute)
+        s_enc = _encode_for_sklearn(synthetic, col_types, impute=self.impute)
 
         # Align columns after one-hot expansion
         all_cols = sorted(set(r_enc.columns) | set(s_enc.columns))
@@ -111,12 +127,20 @@ class CrossClassification(BaseMetric):
         X = pd.concat([r_enc, s_enc], ignore_index=True)
         y = np.array([0] * len(r_enc) + [1] * len(s_enc))
 
+        from sklearn.metrics import roc_auc_score
+
+        oob_auroc = None
+
         if self.model == "rf":
             clf = RandomForestClassifier(
                 n_estimators=self.n_estimators,
                 random_state=self.random_state,
                 n_jobs=-1,
+                oob_score=True,
             )
+            clf.fit(X, y)
+            oob_proba = clf.oob_decision_function_[:, 1]
+            oob_auroc = float(roc_auc_score(y, oob_proba))
         else:
             clf = Pipeline([
                 ("scaler", StandardScaler()),
@@ -130,16 +154,25 @@ class CrossClassification(BaseMetric):
         std_auroc = float(np.std(auroc_scores))
         score = float(1.0 - 2.0 * abs(mean_auroc - 0.5))
 
+        details = {
+            "mean_auroc": mean_auroc,
+            "std_auroc": std_auroc,
+            "fold_aurocs": auroc_scores.tolist(),
+            "n_real": len(real),
+            "n_synthetic": len(synthetic),
+            "n_real_used": len(r_enc),
+            "n_synthetic_used": len(s_enc),
+            "impute": self.impute,
+        }
+        if oob_auroc is not None:
+            details["oob_auroc"] = oob_auroc
+            details["oob_error"] = float(1.0 - oob_auroc)
+            details["oob_fidelity_score"] = float(1.0 - 2.0 * abs(oob_auroc - 0.5))
+
         return MetricResult(
             metric_name=self.name,
             score=max(0.0, score),
-            details={
-                "mean_auroc": mean_auroc,
-                "std_auroc": std_auroc,
-                "fold_aurocs": auroc_scores.tolist(),
-                "n_real": len(real),
-                "n_synthetic": len(synthetic),
-            },
+            details=details,
         )
 
 
@@ -160,7 +193,7 @@ class PropensityMSE(BaseMetric):
 
     Normalisation
     -------------
-    Following Snoke et al. (2018), we normalise by the theoretical null pMSE:
+    Following Snoke et al. (2017), we normalise by the theoretical null pMSE:
 
         c = n_synthetic / (n_real + n_synthetic)
         pMSE_null = c × (1 − c)     # ≈ 0.25 when n_real = n_synthetic
@@ -172,7 +205,7 @@ class PropensityMSE(BaseMetric):
 
     References
     ----------
-    Snoke et al. (2018) "General and specific utility measures for synthetic data."
+    Snoke et al. (2017) "General and specific utility measures for synthetic data."
     """
 
     name = "Propensity MSE"
@@ -246,3 +279,263 @@ class PropensityMSE(BaseMetric):
             ("scaler", StandardScaler()),
             ("lr", LogisticRegression(max_iter=self.max_iter, random_state=self.random_state)),
         ])
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers for cross-classification metrics
+# ---------------------------------------------------------------------------
+
+def _crcl_encode_aligned(
+    real: pd.DataFrame,
+    synthetic: pd.DataFrame,
+    target_col: str,
+    col_types: ColumnTypes,
+    impute: bool = False,
+):
+    """
+    Encode real and synthetic datasets into a shared feature space for a given
+    target column.  Returns (X_real, y_real, X_synth, y_synth, is_categorical).
+
+    One-hot encoding uses the union of category values from both datasets so
+    that real and synthetic feature matrices share identical columns.
+    Rows with NaN in the target are always dropped first.
+    Feature NaNs: dropped row-wise (complete case, default) or imputed.
+    Returns None if either encoded dataset has fewer than 2 rows.
+    """
+    feature_cols = [c for c in col_types if c != target_col
+                    and c in real.columns and c in synthetic.columns]
+    is_cat_target = col_types.get(target_col) == "categorical"
+
+    def _clean(df: pd.DataFrame) -> pd.DataFrame:
+        sub = df[feature_cols + [target_col]].dropna(subset=[target_col])
+        if not impute:
+            return sub.dropna()
+        for col in feature_cols:
+            if col_types.get(col) == "categorical":
+                sub = sub.copy()
+                sub[col] = sub[col].astype(str).fillna("__missing__")
+            else:
+                sub = sub.copy()
+                sub[col] = sub[col].fillna(sub[col].median())
+        return sub
+
+    r = _clean(real)
+    s = _clean(synthetic)
+    if len(r) < 2 or len(s) < 2:
+        return None
+
+    # Encode target with a shared label space
+    if is_cat_target:
+        all_vals = sorted(set(r[target_col].astype(str)) | set(s[target_col].astype(str)))
+        le = LabelEncoder()
+        le.fit(all_vals)
+        y_r = le.transform(r[target_col].astype(str))
+        y_s = le.transform(s[target_col].astype(str))
+    else:
+        y_r = r[target_col].values.astype(float)
+        y_s = s[target_col].values.astype(float)
+
+    # One-hot encode features using the union of categories from both datasets
+    cat_feat_cols = [c for c in feature_cols if col_types.get(c) == "categorical"]
+    r_feat = r[feature_cols].copy()
+    s_feat = s[feature_cols].copy()
+
+    if cat_feat_cols:
+        r_dummies = pd.get_dummies(r_feat, columns=cat_feat_cols, drop_first=False)
+        s_dummies = pd.get_dummies(s_feat, columns=cat_feat_cols, drop_first=False)
+        all_cols = sorted(set(r_dummies.columns) | set(s_dummies.columns))
+        r_feat = r_dummies.reindex(columns=all_cols, fill_value=0)
+        s_feat = s_dummies.reindex(columns=all_cols, fill_value=0)
+
+    return r_feat.values.astype(float), y_r, s_feat.values.astype(float), y_s, is_cat_target
+
+
+def _crcl_score(y_true, y_pred, is_categorical: bool) -> float:
+    """Accuracy for categorical targets, R² for numerical."""
+    if is_categorical:
+        return float(accuracy_score(y_true, y_pred))
+    return float(r2_score(y_true, y_pred))
+
+
+def _build_dt(is_categorical: bool, random_state: int, max_depth=None):
+    if is_categorical:
+        return DecisionTreeClassifier(random_state=random_state, max_depth=max_depth)
+    return DecisionTreeRegressor(random_state=random_state, max_depth=max_depth)
+
+
+def _crcl_run(
+    train_X, train_y, other_X, other_y,
+    is_cat: bool, test_size: float, random_state: int, max_depth,
+):
+    """
+    Split train set, fit decision tree, score on held-out split and on other set.
+    Returns (perf_held_out, perf_other, ratio) or None if too few classes.
+    """
+    if is_cat and len(np.unique(train_y)) < 2:
+        return None
+    X_tr, X_held, y_tr, y_held = train_test_split(
+        train_X, train_y, test_size=test_size, random_state=random_state,
+        stratify=train_y if is_cat else None,
+    )
+    clf = _build_dt(is_cat, random_state, max_depth)
+    clf.fit(X_tr, y_tr)
+    perf_held = _crcl_score(y_held, clf.predict(X_held), is_cat)
+    perf_other = _crcl_score(other_y, clf.predict(other_X), is_cat)
+    ratio = perf_other / perf_held if abs(perf_held) > 1e-9 else float("nan")
+    return perf_held, perf_other, ratio
+
+
+# ---------------------------------------------------------------------------
+# CrossClassification  (unified RS / SR via mode parameter)
+# ---------------------------------------------------------------------------
+
+class CrossClassification(BaseMetric):
+    """
+    Unified cross-classification metric supporting both CrCl-RS and CrCl-SR
+    modes via the ``mode`` parameter.
+
+    For each variable used as a target in turn, the remaining variables are
+    used as predictors.  A decision tree is trained on one dataset and
+    evaluated on both a held-out split of the training dataset and on the
+    other dataset.  The ratio of the two performance values is computed, and
+    the mean ratio across all target variables is reported.  A value close to
+    1 is ideal.
+
+    Modes
+    -----
+    ``"RS"`` — CrCl-RS: train on real, evaluate on held-out real and synthetic.
+        Useful for assessing whether the statistical properties of the real data
+        are preserved in the synthetic data.
+
+    ``"SR"`` — CrCl-SR: train on synthetic, evaluate on held-out synthetic and real.
+        Useful for assessing whether conclusions from models trained on synthetic
+        data transfer to real data.
+
+    Procedure (repeated for each variable as target)
+    ------------------------------------------------
+    1. Encode real and synthetic into a shared feature space (union OHE).
+    2. Split the training dataset (real for RS, synthetic for SR) into
+       train / held-out test sets.
+    3. Train a decision tree on the training split.
+    4. Evaluate on the held-out test set  → perf_held
+    5. Evaluate on the other dataset      → perf_other
+    6. ratio = perf_other / perf_held
+
+    Performance metric: accuracy (categorical target), R² (numerical target).
+
+    Score
+    -----
+        score = max(0, 1 − |mean_ratio − 1|)
+
+    References
+    ----------
+    Goncalves A, Ray P, Soper B, Stevens J, Coyle L, Sales AP.
+    Generation and evaluation of synthetic patient data.
+    BMC Med Res Methodol. 2020;20(1):108.
+    doi:10.1186/s12874-020-00977-1
+    """
+
+    axis = "fidelity"
+
+    def __init__(
+        self,
+        mode: str = "RS",
+        test_size: float = 0.3,
+        max_depth: int = None,
+        random_state: int = 42,
+        impute: bool = False,
+    ) -> None:
+        if mode not in ("RS", "SR"):
+            raise ValueError(f"mode must be 'RS' or 'SR', got {mode!r}")
+        self.mode = mode
+        self.test_size = test_size
+        self.max_depth = max_depth
+        self.random_state = random_state
+        self.impute = impute
+
+    @property
+    def name(self) -> str:
+        return f"CrCl-{self.mode}"
+
+    @property
+    def description(self) -> str:
+        if self.mode == "RS":
+            return (
+                "Cross-classification (train real, test real+synth): ratio of synthetic "
+                "to held-out real performance per target variable (ideal = 1)."
+            )
+        return (
+            "Cross-classification (train synth, test synth+real): ratio of real "
+            "to held-out synthetic performance per target variable (ideal = 1)."
+        )
+
+    def evaluate(
+        self,
+        real: pd.DataFrame,
+        synthetic: pd.DataFrame,
+        col_types: ColumnTypes,
+    ) -> MetricResult:
+        per_variable: dict = {}
+        skipped: list = []
+
+        for target_col in col_types:
+            encoded = _crcl_encode_aligned(real, synthetic, target_col, col_types, self.impute)
+            if encoded is None:
+                skipped.append(target_col)
+                continue
+            X_r, y_r, X_s, y_s, is_cat = encoded
+
+            # Select train/other based on mode
+            if self.mode == "RS":
+                train_X, train_y, other_X, other_y = X_r, y_r, X_s, y_s
+                perf_keys = ("perf_real_test", "perf_synth")
+            else:
+                train_X, train_y, other_X, other_y = X_s, y_s, X_r, y_r
+                perf_keys = ("perf_synth_test", "perf_real")
+
+            if len(train_X) < 10:
+                skipped.append(target_col)
+                continue
+
+            result = _crcl_run(
+                train_X, train_y, other_X, other_y,
+                is_cat, self.test_size, self.random_state, self.max_depth,
+            )
+            if result is None:
+                skipped.append(target_col)
+                continue
+
+            perf_held, perf_other, ratio = result
+            per_variable[target_col] = {
+                perf_keys[0]: perf_held,
+                perf_keys[1]: perf_other,
+                "ratio": ratio,
+                "target_type": "categorical" if is_cat else "numerical",
+            }
+
+        valid_ratios = [
+            v["ratio"] for v in per_variable.values() if not np.isnan(v["ratio"])
+        ]
+        if not valid_ratios:
+            return MetricResult(
+                metric_name=self.name, score=1.0,
+                details={"message": "No valid target variables.", "skipped": skipped},
+            )
+
+        mean_ratio = float(np.mean(valid_ratios))
+        score = max(0.0, float(1.0 - abs(mean_ratio - 1.0)))
+        return MetricResult(
+            metric_name=self.name,
+            score=score,
+            details={
+                "mean_ratio": mean_ratio,
+                "per_variable": per_variable,
+                "skipped": skipped,
+                "mode": self.mode,
+            },
+        )
+
+
+# Convenience aliases
+CrossClassificationRS = lambda **kw: CrossClassification(mode="RS", **kw)
+CrossClassificationSR = lambda **kw: CrossClassification(mode="SR", **kw)

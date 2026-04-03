@@ -41,7 +41,7 @@ synthetic_datasets:
 #   contingency: true
 #   pairwise_correlation_difference: true
 #   # Multivariate
-#   cross_classification: true
+#   auc_roc: true
 #   propensity_mse: true
 #   # Missingness
 #   rate: true

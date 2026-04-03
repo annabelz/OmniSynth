@@ -73,12 +73,19 @@ class FidelityConfig:
     contingency_max_categories: int = 30  # skip cols with more unique values
 
     # Multivariate — metric enable flags
-    run_cross_classification: bool = True
+    run_auc_roc: bool = True
     run_propensity_mse: bool = True
+    run_crcl_rs: bool = True
+    run_crcl_sr: bool = True
 
     # Multivariate — metric settings
-    cross_classification_n_estimators: int = 100
-    cross_classification_cv_folds: int = 5
+    auc_roc_n_estimators: int = 100
+    auc_roc_cv_folds: int = 5
+    auc_roc_impute: bool = False  # default: complete case analysis
+
+    crcl_test_size: float = 0.3
+    crcl_max_depth: int = None
+    crcl_impute: bool = False
     propensity_mse_model: Literal["logistic", "rf"] = "logistic"
     propensity_mse_n_estimators: int = 100  # only used when model == "rf"
     propensity_mse_max_iter: int = 1000     # only used when model == "logistic"

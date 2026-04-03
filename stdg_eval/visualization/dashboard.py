@@ -182,7 +182,7 @@ def _sidebar():
                     st.session_state["run_spearman"] = fc.run_spearman
                     st.session_state["run_contingency"] = fc.run_contingency
                     st.session_state["run_pcd"] = fc.run_pcd
-                    st.session_state["run_cc"] = fc.run_cross_classification
+                    st.session_state["run_cc"] = fc.run_auc_roc
                     st.session_state["run_pmse"] = fc.run_propensity_mse
                     st.session_state["run_miss_rate"] = mc.run_rate
                     st.session_state["run_miss_set"] = mc.run_set_distribution
@@ -270,7 +270,7 @@ def _sidebar():
         run_pcd = st.checkbox("↳ Pairwise Correlation Difference", value=True, key="run_pcd", disabled=not run_bi)
 
         run_multi = st.checkbox("Multivariate", value=True, key="run_multi")
-        run_cc = st.checkbox("↳ Cross-Classification", value=True, key="run_cc", disabled=not run_multi)
+        run_cc = st.checkbox("↳ AUC-ROC", value=True, key="run_cc", disabled=not run_multi)
         run_pmse = st.checkbox("↳ Propensity MSE", value=True, key="run_pmse", disabled=not run_multi)
 
         run_miss = st.checkbox("Missingness", value=True, key="run_miss")
@@ -374,7 +374,7 @@ def _run_evaluation(
                         del res["bivariate"]
                 if "multivariate" in res:
                     if not run_cc:
-                        res["multivariate"].pop("cross_classification", None)
+                        res["multivariate"].pop("auc_roc", None)
                     if not run_pmse:
                         res["multivariate"].pop("propensity_mse", None)
                     if not res["multivariate"]:
@@ -459,7 +459,7 @@ def _weight_controls():
                     st.caption("Includes: " + " + ".join(active_bi) if active_bi else "")
                 if multi_active:
                     st.slider("Multivariate", 0.0, 1.0, DEFAULT_FIDELITY_WEIGHTS[2], 0.01, key="w_multi")
-                    st.caption(_fidelity_sub_label("run_cc", "Cross-class", "run_pmse", "pMSE"))
+                    st.caption(_fidelity_sub_label("run_cc", "AUC-ROC", "run_pmse", "pMSE"))
             else:
                 st.caption("No fidelity metrics selected.")
         with weight_cols[1]:
@@ -722,16 +722,25 @@ def _tab_individual():
     # ------------------------------------------------------------------
     if "multivariate" in fid_res:
         with st.expander("Multivariate metrics", expanded=True):
-            cc_res = fid_res["multivariate"].get("cross_classification")
+            cc_res = fid_res["multivariate"].get("auc_roc")
             pmse_res = fid_res["multivariate"].get("propensity_mse")
 
             m_cols = st.columns(2)
             if cc_res:
                 with m_cols[0]:
-                    st.metric("Cross-Classification AUROC",
+                    st.metric("AUC-ROC (CV mean)",
                               f"{cc_res.details.get('mean_auroc', 0):.4f}",
                               help="0.5 = indistinguishable; 1.0 = perfectly separable")
                     st.caption(f"Score: {cc_res.score:.3f}")
+                    if cc_res.details.get("oob_auroc") is not None:
+                        st.caption(
+                            f"OOB AUROC: {cc_res.details['oob_auroc']:.4f}  |  "
+                            f"OOB fidelity score: {cc_res.details['oob_fidelity_score']:.4f}"
+                        )
+                    n_used = cc_res.details.get("n_real_used")
+                    n_total = cc_res.details.get("n_real")
+                    if n_used is not None and n_used != n_total:
+                        st.caption(f"Rows used (complete case): {n_used} / {n_total}")
                     fold_aurocs = cc_res.details.get("fold_aurocs", [])
                     if fold_aurocs:
                         fig = go_bar_folds(fold_aurocs)
@@ -880,12 +889,6 @@ def _tab_benchmarking():
     summary_df = pd.DataFrame(rows)
 
     # ------------------------------------------------------------------
-    # Score table
-    # ------------------------------------------------------------------
-    st.subheader("Score summary")
-    st.plotly_chart(P.plot_score_table(summary_df), use_container_width=True)
-
-    # ------------------------------------------------------------------
     # Rankings
     # ------------------------------------------------------------------
     st.subheader("Rankings")
@@ -934,19 +937,6 @@ def _tab_benchmarking():
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    # ------------------------------------------------------------------
-    # Per-group breakdown
-    # ------------------------------------------------------------------
-    st.subheader("Per-group score breakdown")
-    group_cols = ["Dataset", "  Univariate", "  Bivariate", "  Multivariate", "Missingness"]
-    available = [c for c in group_cols if c in summary_df.columns]
-    if available:
-        st.dataframe(
-            summary_df[available].style.format(
-                {c: "{:.4f}" for c in available if c != "Dataset"}
-            ),
-            use_container_width=True,
-        )
 
 
 # ===========================================================================
@@ -966,6 +956,134 @@ def _tab_score_summary():
 
     fidelity_weights, univariate_metric_weights, miss_weights, composite_weights = _get_weights()
     run_names = list(synths.keys())
+
+    # ------------------------------------------------------------------
+    # Compute summary scores (same logic as benchmarking tab)
+    # ------------------------------------------------------------------
+    summary_rows = []
+    for name in run_names:
+        fid_res = fid_all.get(name, {})
+        miss_res = miss_all.get(name, {})
+        f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights, univariate_metric_weights=univariate_metric_weights) if fid_res else {}
+        m_scores = compute_missingness_score(miss_res, weights=miss_weights) if miss_res else {}
+        comp = compute_composite_score(f_scores, m_scores, weights=composite_weights) if (f_scores or m_scores) else {}
+        row = {"Dataset": name}
+        if f_scores:
+            row.update({
+                "Fidelity": f_scores.get("overall"),
+                "  Univariate": f_scores.get("univariate"),
+                "  Bivariate": f_scores.get("bivariate"),
+                "  Multivariate": f_scores.get("multivariate"),
+            })
+        if m_scores:
+            row["Missingness"] = m_scores.get("overall")
+        if comp:
+            row["Composite"] = comp.get("composite")
+        summary_rows.append(row)
+    summary_df = pd.DataFrame(summary_rows)
+
+    def _score_table(df_rows, index_col, score_cols):
+        df = pd.DataFrame(df_rows).set_index(index_col)
+        non_score = [c for c in df.columns if c not in score_cols]
+        col_order = non_score + score_cols
+        return df[col_order].style.format(
+            {c: "{:.4f}" for c in score_cols}, na_rep="—"
+        ).background_gradient(subset=score_cols, cmap="RdYlGn", vmin=0, vmax=1)
+
+    # ------------------------------------------------------------------
+    # Table 1 — individual metric scores
+    # ------------------------------------------------------------------
+    st.subheader("Individual metric scores")
+
+    metric_label_map = {
+        ("univariate", "wasserstein"): ("Wasserstein Distance", "Univariate"),
+        ("univariate", "tvd"): ("Total Variation Distance", "Univariate"),
+        ("univariate", "hellinger"): ("Hellinger Distance", "Univariate"),
+        ("bivariate", "spearman"): ("Spearman Correlation", "Bivariate"),
+        ("bivariate", "contingency"): ("Contingency Matrix", "Bivariate"),
+        ("bivariate", "pcd"): ("Pairwise Correlation Difference", "Bivariate"),
+        ("multivariate", "auc_roc"): ("AUC-ROC", "Multivariate"),
+        ("multivariate", "propensity_mse"): ("Propensity MSE", "Multivariate"),
+        ("missingness", "rate"): ("Missingness Rate", "Missingness"),
+        ("missingness", "set_distribution"): ("Pattern Distribution", "Missingness"),
+        ("missingness", "classifier_auroc"): ("Classifier AUROC", "Missingness"),
+        ("missingness", "dependency_structure"): ("Dependency Structure", "Missingness"),
+    }
+    metric_rows = []
+    for (group, key), (label, group_label) in metric_label_map.items():
+        row = {"Metric": label, "Group": group_label}
+        found = False
+        for name in run_names:
+            res = miss_all.get(name, {}).get(key) if group == "missingness" \
+                else fid_all.get(name, {}).get(group, {}).get(key)
+            if res is not None:
+                row[name] = round(res.score, 4)
+                found = True
+            else:
+                row[name] = None
+        if found:
+            metric_rows.append(row)
+
+    if metric_rows:
+        st.dataframe(
+            _score_table(metric_rows, "Metric", run_names),
+            use_container_width=True,
+        )
+
+    # ------------------------------------------------------------------
+    # Table 2 — metric group scores
+    # ------------------------------------------------------------------
+    st.subheader("Metric group scores")
+
+    group_label_map = {
+        "  Univariate": "Univariate (fidelity)",
+        "  Bivariate": "Bivariate (fidelity)",
+        "  Multivariate": "Multivariate (fidelity)",
+        "Missingness": "Missingness",
+    }
+    group_rows = []
+    for col, label in group_label_map.items():
+        if col not in summary_df.columns:
+            continue
+        row = {"Group": label}
+        for name in run_names:
+            match = summary_df.loc[summary_df["Dataset"] == name, col]
+            row[name] = round(float(match.values[0]), 4) if len(match) > 0 and pd.notna(match.values[0]) else None
+        group_rows.append(row)
+
+    if group_rows:
+        st.dataframe(
+            _score_table(group_rows, "Group", run_names),
+            use_container_width=True,
+        )
+
+    # ------------------------------------------------------------------
+    # Table 3 — axis and composite scores
+    # ------------------------------------------------------------------
+    st.subheader("Axis and composite scores")
+
+    axis_label_map = {
+        "Fidelity": "Fidelity",
+        "Missingness": "Missingness",
+        "Composite": "Composite",
+    }
+    axis_rows = []
+    for col, label in axis_label_map.items():
+        if col not in summary_df.columns:
+            continue
+        row = {"Axis": label}
+        for name in run_names:
+            match = summary_df.loc[summary_df["Dataset"] == name, col]
+            row[name] = round(float(match.values[0]), 4) if len(match) > 0 and pd.notna(match.values[0]) else None
+        axis_rows.append(row)
+
+    if axis_rows:
+        st.dataframe(
+            _score_table(axis_rows, "Axis", run_names),
+            use_container_width=True,
+        )
+
+    st.divider()
 
     # ------------------------------------------------------------------
     # Helper: normalise a weight dict, keeping only present keys
@@ -1110,7 +1228,7 @@ def _tab_score_summary():
 
     # --- Group-level summary rows for multivariate ---
     for group_key, group_label, sub_key in [
-        ("multivariate", "Multivariate (Cross-classification)", "cross_classification"),
+        ("multivariate", "Multivariate (AUC-ROC)", "auc_roc"),
         ("multivariate", "Multivariate (Propensity MSE)", "propensity_mse"),
     ]:
         if not any(sub_key in fid_all.get(n, {}).get(group_key, {}) for n in run_names):
@@ -1362,7 +1480,7 @@ def _tab_metric_correlation():
             ("bivariate", "spearman", "Spearman"),
             ("bivariate", "contingency", "Contingency"),
             ("bivariate", "pcd", "PCD"),
-            ("multivariate", "cross_classification", "Cross-classification"),
+            ("multivariate", "auc_roc", "AUC-ROC"),
             ("multivariate", "propensity_mse", "Propensity MSE"),
         ]:
             res = fres.get(group, {}).get(mkey)
@@ -1405,7 +1523,7 @@ def run_dashboard():
 
 | Axis | Status | Metrics |
 |------|--------|---------|
-| **Fidelity** | ✅ Available | Wasserstein Distance, TVD, Spearman Correlation, Contingency Matrix, Cross-Classification, Propensity MSE |
+| **Fidelity** | ✅ Available | Wasserstein Distance, TVD, Spearman Correlation, Contingency Matrix, AUC-ROC, Propensity MSE |
 | **Missingness** | ✅ Available | Missingness Rate, Pattern Distribution, Classifier AUROC, Dependency Structure |
 | **Utility** | 🔜 TODO | Downstream task performance |
 | **Privacy** | 🔜 TODO | Disclosure risk, membership inference |

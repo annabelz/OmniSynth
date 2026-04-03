@@ -28,7 +28,7 @@ JSON schema
       "pcd":         {"score": float, "details": {...}}
     },
     "multivariate": {
-      "cross_classification": {"score": float, "details": {...}},
+      "auc_roc": {"score": float, "details": {...}},
       "propensity_mse":       {"score": float, "details": {...}}
     }
   },

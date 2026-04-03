@@ -224,7 +224,7 @@ def load_config(path: str | pathlib.Path) -> dict:
               hellinger: true
               spearman: true
               contingency: true
-              cross_classification: true
+              auc_roc: true
               propensity_mse: true
               rate: true
               set_distribution: true
@@ -282,7 +282,7 @@ def eval_config_from_dict(cfg: dict) -> EvalConfig:
         run_spearman=metrics.get("spearman", True),
         run_contingency=metrics.get("contingency", True),
         run_pcd=metrics.get("pairwise_correlation_difference", True),
-        run_cross_classification=metrics.get("cross_classification", True),
+        run_auc_roc=metrics.get("auc_roc", True),
         run_propensity_mse=metrics.get("propensity_mse", True),
     )
     missingness = MissingnessConfig(
