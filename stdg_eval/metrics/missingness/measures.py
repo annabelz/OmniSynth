@@ -43,17 +43,12 @@ class MissingnessRate(BaseMetric):
     """
     Per-variable missingness rate comparison.
 
-    For each column, the missingness distribution is binary (missing vs. present),
-    so TVD per column = |rate_real - rate_synth|.  The overall summary score is
-    the TVD between the two missingness-rate bar charts:
-
-        TVD = 0.5 * Σ |rate_real_i − rate_synth_i|
-
-    Score = 1 − TVD, clipped to [0, 1].
+    For each column, compute the fraction of missing values in real and synthetic.
+    Score = 1 − mean(|rate_real − rate_synth|) across all columns.
     """
 
     name = "Missingness Rate"
-    description = "TVD between real and synthetic per-column missingness rate distributions."
+    description = "Per-column absolute difference in missing-value rates between real and synthetic data."
     axis = "missingness"
 
     def evaluate(
@@ -69,20 +64,20 @@ class MissingnessRate(BaseMetric):
         for col in real.columns:
             r_rate = float(real[col].isnull().mean())
             s_rate = float(synthetic[col].isnull().mean()) if col in synthetic.columns else 0.0
+            diff = abs(r_rate - s_rate)
 
             real_rates[col] = r_rate
             synth_rates[col] = s_rate
-            column_scores[col] = abs(r_rate - s_rate)
+            column_scores[col] = 1.0 - diff
 
-        tvd = 0.5 * float(np.sum(list(column_scores.values()))) if column_scores else 0.0
+        overall_score = float(np.mean(list(column_scores.values()))) if column_scores else 1.0
 
         return MetricResult(
             metric_name=self.name,
-            score=max(0.0, 1.0 - tvd),
+            score=max(0.0, overall_score),
             details={
                 "real_rates": real_rates,
                 "synth_rates": synth_rates,
-                "tvd": tvd,
             },
             column_scores=column_scores,
         )
@@ -348,7 +343,7 @@ class MissingnessDependencyStructure(BaseMetric):
 
         return MetricResult(
             metric_name=self.name,
-            score=max(0.0, 1.0 - mean_diff),
+            score=max(0.0, 1.0 - mean_diff),List 
             details={
                 "mean_absolute_difference": mean_diff,
                 "real_correlation_matrix": pd.DataFrame(
