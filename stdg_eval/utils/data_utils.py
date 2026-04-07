@@ -228,7 +228,7 @@ def load_config(path: str | pathlib.Path) -> dict:
               propensity_mse: true
               rate: true
               set_distribution: true
-              classifier_auroc: true
+              missing_auroc: true
               dependency_structure: true
 
     Example
@@ -288,7 +288,7 @@ def eval_config_from_dict(cfg: dict) -> EvalConfig:
     missingness = MissingnessConfig(
         run_rate=metrics.get("rate", True),
         run_set_distribution=metrics.get("set_distribution", True),
-        run_classifier_auroc=metrics.get("classifier_auroc", True),
+        run_missing_auroc=metrics.get("missing_auroc", True),
         run_dependency_structure=metrics.get("dependency_structure", True),
     )
     return EvalConfig(fidelity=fidelity, missingness=missingness)

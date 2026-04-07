@@ -13,7 +13,7 @@ interchangeably.
 
 Fidelity weight vector:   [univariate_weight, bivariate_weight, multivariate_weight]
 Missingness weight vector: [rate_weight, set_distribution_weight,
-                            classifier_auroc_weight, dependency_structure_weight]
+                            missing_auroc_weight, dependency_structure_weight]
 Composite weight vector:  [fidelity_weight, missingness_weight]
     TODO: extend to [fidelity, missingness, utility, privacy] once those axes
           are implemented.
@@ -143,7 +143,7 @@ def compute_missingness_score(
         Output of :func:`~stdg_eval.evaluation.missingness.evaluate_missingness`.
     weights:
         ``[rate_weight, set_distribution_weight,
-           classifier_auroc_weight, dependency_structure_weight]``.
+           missing_auroc_weight, dependency_structure_weight]``.
         Defaults to ``DEFAULT_MISSINGNESS_WEIGHTS`` (equal weights).
 
     Returns
@@ -152,13 +152,13 @@ def compute_missingness_score(
         ``"overall"``              — final weighted score ∈ [0, 1]
         ``"rate"``                 — missingness rate score
         ``"set_distribution"``     — pattern distribution score
-        ``"classifier_auroc"``     — AUROC similarity score
+        ``"missing_auroc"``     — AUROC similarity score
         ``"dependency_structure"`` — dependency structure score
         ``"weights_used"``         — normalised weights actually applied
     """
     weights = weights or DEFAULT_MISSINGNESS_WEIGHTS
 
-    metric_names = ["rate", "set_distribution", "classifier_auroc", "dependency_structure"]
+    metric_names = ["rate", "set_distribution", "missing_auroc", "dependency_structure"]
     present = [m for m in metric_names if m in missingness_results]
 
     if not present:

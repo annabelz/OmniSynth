@@ -373,10 +373,16 @@ def _crcl_run(
     """
     if is_cat and len(np.unique(train_y)) < 2:
         return None
-    X_tr, X_held, y_tr, y_held = train_test_split(
-        train_X, train_y, test_size=test_size, random_state=random_state,
-        stratify=train_y if is_cat else None,
-    )
+    try:
+        X_tr, X_held, y_tr, y_held = train_test_split(
+            train_X, train_y, test_size=test_size, random_state=random_state,
+            stratify=train_y if is_cat else None,
+        )
+    except ValueError:
+        # Fallback: some classes too rare to stratify — use random split
+        X_tr, X_held, y_tr, y_held = train_test_split(
+            train_X, train_y, test_size=test_size, random_state=random_state,
+        )
     clf = _build_dt(is_cat, random_state, max_depth)
     clf.fit(X_tr, y_tr)
     perf_held = _crcl_score(y_held, clf.predict(X_held), is_cat)

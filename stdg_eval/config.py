@@ -34,7 +34,7 @@ DEFAULT_UNIVARIATE_WEIGHTS: Optional[Dict[str, float]] = None
 # ---------------------------------------------------------------------------
 # Missingness scoring defaults
 # ---------------------------------------------------------------------------
-# Default weights: [rate, set_distribution, classifier_auroc, dependency_structure]
+# Default weights: [rate, set_distribution, missing_auroc, dependency_structure]
 # Must sum to 1.0.
 DEFAULT_MISSINGNESS_WEIGHTS: List[float] = [0.25, 0.25, 0.25, 0.25]
 
@@ -98,7 +98,7 @@ class MissingnessConfig:
     # Metric enable flags
     run_rate: bool = True
     run_set_distribution: bool = True
-    run_classifier_auroc: bool = True
+    run_missing_auroc: bool = True
     run_dependency_structure: bool = True
 
     # Metric settings

@@ -476,6 +476,118 @@ def plot_metric_correlation_heatmap(corr_df: pd.DataFrame, title: str = "Metric 
     return fig
 
 
+def plot_crcl_ratios(
+    per_variable: Dict[str, dict],
+    mode: str,
+    synth_label: str = "Synthetic",
+) -> go.Figure:
+    """
+    Bar chart of per-variable cross-classification ratios.
+
+    Each bar is perf_other / perf_held_out, with a reference line at 1.0
+    (perfect score). Bars > 1 are coloured blue (better than expected),
+    bars < 1 are coloured red (worse than expected).
+    """
+    cols = list(per_variable.keys())
+    ratios = [per_variable[c]["ratio"] for c in cols]
+    colors = ["steelblue" if r >= 1.0 else "tomato" for r in ratios]
+
+    if mode == "RS":
+        train_label, test_label = "Real (train)", f"{synth_label} (test)"
+        hover = [
+            f"perf_real_test: {per_variable[c].get('perf_real_test', float('nan')):.4f}<br>"
+            f"perf_synth: {per_variable[c].get('perf_synth', float('nan')):.4f}<br>"
+            f"type: {per_variable[c].get('target_type', '')}"
+            for c in cols
+        ]
+    else:
+        train_label, test_label = f"{synth_label} (train)", "Real (test)"
+        hover = [
+            f"perf_synth_test: {per_variable[c].get('perf_synth_test', float('nan')):.4f}<br>"
+            f"perf_real: {per_variable[c].get('perf_real', float('nan')):.4f}<br>"
+            f"type: {per_variable[c].get('target_type', '')}"
+            for c in cols
+        ]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=cols,
+        y=ratios,
+        marker_color=colors,
+        text=[f"{r:.3f}" for r in ratios],
+        textposition="outside",
+        hovertext=hover,
+        hoverinfo="text+x",
+    ))
+    fig.add_hline(y=1.0, line_dash="dash", line_color="black", line_width=1)
+    fig.update_layout(
+        title=f"CrCl-{mode}: per-variable ratio ({train_label} → {test_label})",
+        yaxis_title="perf_other / perf_held_out",
+        xaxis_title="Target variable",
+        height=max(300, 40 * len(cols) + 120),
+        margin=dict(l=60, r=60, t=60, b=120),
+        xaxis_tickangle=-45,
+    )
+    return fig
+
+
+def plot_crcl_scores(
+    per_variable: Dict[str, dict],
+    mode: str,
+    synth_label: str = "Synthetic",
+) -> go.Figure:
+    """
+    Grouped bar chart showing the two raw performance scores per target variable
+    for a CrCl-RS or CrCl-SR result.
+
+    For RS: bars are perf_real_test (held-out) and perf_synth (other).
+    For SR: bars are perf_synth_test (held-out) and perf_real (other).
+    Score metric is accuracy for categorical targets, R² for numerical.
+    """
+    cols = list(per_variable.keys())
+
+    if mode == "RS":
+        held_key, other_key = "perf_real_test", "perf_synth"
+        held_label = "Real (held-out test)"
+        other_label = f"{synth_label}"
+    else:
+        held_key, other_key = "perf_synth_test", "perf_real"
+        held_label = f"{synth_label} (held-out test)"
+        other_label = "Real"
+
+    held_vals = [per_variable[c].get(held_key, float("nan")) for c in cols]
+    other_vals = [per_variable[c].get(other_key, float("nan")) for c in cols]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        name=held_label,
+        x=cols,
+        y=held_vals,
+        marker_color="steelblue",
+        text=[f"{v:.3f}" if not (v != v) else "" for v in held_vals],
+        textposition="outside",
+    ))
+    fig.add_trace(go.Bar(
+        name=other_label,
+        x=cols,
+        y=other_vals,
+        marker_color="darkorange",
+        text=[f"{v:.3f}" if not (v != v) else "" for v in other_vals],
+        textposition="outside",
+    ))
+    fig.update_layout(
+        barmode="group",
+        title=f"CrCl-{mode}: per-variable performance scores (acc / R²)",
+        yaxis_title="Accuracy (categorical) / R² (numerical)",
+        xaxis_title="Target variable",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        height=max(350, 40 * len(cols) + 150),
+        margin=dict(l=60, r=60, t=80, b=120),
+        xaxis_tickangle=-45,
+    )
+    return fig
+
+
 def plot_score_bar(
     scores: Dict[str, float],
     title: str = "Scores",
