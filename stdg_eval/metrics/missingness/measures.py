@@ -343,7 +343,7 @@ class MissingnessDependencyStructure(BaseMetric):
 
         return MetricResult(
             metric_name=self.name,
-            score=max(0.0, 1.0 - mean_diff),List 
+            score=max(0.0, 1.0 - mean_diff),
             details={
                 "mean_absolute_difference": mean_diff,
                 "real_correlation_matrix": pd.DataFrame(
