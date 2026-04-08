@@ -5,8 +5,6 @@ WassersteinDistance  — numerical columns  (1st Wasserstein / Earth Mover's Dis
 TotalVariationDistance — categorical columns
 """
 
-#TODO: Make sure the wasserstein and tvd are implemented well
-
 from __future__ import annotations
 
 import warnings
@@ -18,7 +16,6 @@ from scipy.stats import wasserstein_distance
 
 from stdg_eval.metrics.base import BaseMetric, MetricResult
 from stdg_eval.utils.data_utils import ColumnTypes, get_numerical_columns, get_categorical_columns
-
 
 class WassersteinDistance(BaseMetric):
     """
@@ -130,14 +127,14 @@ class HellingerDistance(BaseMetric):
     def _scott_n_bins(r: np.ndarray, lo: float, hi: float) -> int:
         """
         Compute number of bins using Scott's (1979) reference rule:
-            h = 3.5 · σ_real · n^(-1/3)
+            h = 3.49 · σ_real · n^(-1/3)
             n_bins = ceil((hi − lo) / h)
         Falls back to 1 if σ = 0 or the rule yields fewer than 1 bin.
         """
         std = float(np.std(r, ddof=1)) if len(r) > 1 else 0.0
         if std == 0.0:
             return 1
-        h = 3.5 * std * (len(r) ** (-1 / 3))
+        h = 3.49 * std * (len(r) ** (-1 / 3))
         return max(1, int(np.ceil((hi - lo) / h)))
 
     def _hellinger(self, p: np.ndarray, q: np.ndarray) -> float:
