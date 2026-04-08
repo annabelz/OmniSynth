@@ -53,6 +53,11 @@ from stdg_eval.evaluation.scoring import (
 from stdg_eval.utils.data_utils import detect_column_types, load_dataset, load_config, validate_column_types, eval_config_from_dict
 from stdg_eval.utils.precomputed_io import load_precomputed
 from stdg_eval.visualization import plots as P
+from stdg_eval.visualization.metric_registry import (
+    FIDELITY_GROUPS,
+    MISSINGNESS_METRICS,
+    group_is_active,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -261,27 +266,14 @@ def _sidebar():
                 st.rerun()
 
     with st.sidebar.expander("Metric options", expanded=False):
-        run_uni = st.checkbox("Univariate", value=True, key="run_uni")
-        run_wd = st.checkbox("↳ Wasserstein Distance", value=True, key="run_wd", disabled=not run_uni)
-        run_tvd = st.checkbox("↳ Total Variation Distance", value=True, key="run_tvd", disabled=not run_uni)
-        run_hd = st.checkbox("↳ Hellinger Distance", value=True, key="run_hd", disabled=not run_uni)
-
-        run_bi = st.checkbox("Bivariate", value=True, key="run_bi")
-        run_spearman = st.checkbox("↳ Spearman Correlation", value=True, key="run_spearman", disabled=not run_bi)
-        run_contingency = st.checkbox("↳ Contingency Matrix", value=True, key="run_contingency", disabled=not run_bi)
-        run_pcd = st.checkbox("↳ Pairwise Correlation Difference", value=True, key="run_pcd", disabled=not run_bi)
-
-        run_multi = st.checkbox("Multivariate", value=True, key="run_multi")
-        run_cc = st.checkbox("↳ AUC-ROC", value=True, key="run_cc", disabled=not run_multi)
-        run_pmse = st.checkbox("↳ Propensity MSE", value=True, key="run_pmse", disabled=not run_multi)
-        run_crcl_rs = st.checkbox("↳ CrCl-RS (train real, test synth)", value=True, key="run_crcl_rs", disabled=not run_multi)
-        run_crcl_sr = st.checkbox("↳ CrCl-SR (train synth, test real)", value=True, key="run_crcl_sr", disabled=not run_multi)
+        for group in FIDELITY_GROUPS:
+            run_group = st.checkbox(group["label"], value=True, key=group["run_key"])
+            for m in group["metrics"]:
+                st.checkbox(f"↳ {m['label']}", value=True, key=m["run_key"], disabled=not run_group)
 
         run_miss = st.checkbox("Missingness", value=True, key="run_miss")
-        run_miss_rate = st.checkbox("↳ Rate", value=True, key="run_miss_rate", disabled=not run_miss)
-        run_miss_set = st.checkbox("↳ Pattern Distribution", value=True, key="run_miss_set", disabled=not run_miss)
-        run_miss_auroc = st.checkbox("↳ Classifier AUROC", value=True, key="run_miss_auroc", disabled=not run_miss)
-        run_miss_dep = st.checkbox("↳ Dependency Structure", value=True, key="run_miss_dep", disabled=not run_miss)
+        for m in MISSINGNESS_METRICS:
+            st.checkbox(f"↳ {m['label']}", value=True, key=m["run_key"], disabled=not run_miss)
 
     run_btn = st.sidebar.button(
         "▶ Run evaluation",
@@ -294,26 +286,15 @@ def _sidebar():
     )
 
     if run_btn:
-        _run_evaluation(
-            run_uni, run_bi, run_multi, run_miss,
-            run_wd, run_tvd, run_hd,
-            run_spearman, run_contingency, run_pcd,
-            run_cc, run_pmse, run_crcl_rs, run_crcl_sr,
-            run_miss_rate, run_miss_set, run_miss_auroc, run_miss_dep,
-        )
+        _run_evaluation()
 
 
-def _run_evaluation(
-    run_uni, run_bi, run_multi, run_miss,
-    run_wd=True, run_tvd=True, run_hd=True,
-    run_spearman=True, run_contingency=True, run_pcd=True,
-    run_cc=True, run_pmse=True, run_crcl_rs=True, run_crcl_sr=True,
-    run_miss_rate=True, run_miss_set=True, run_miss_auroc=True, run_miss_dep=True,
-):
-    real = st.session_state["real_df"]
-    synths = st.session_state["synth_dfs"]
-    col_types = st.session_state["col_types"]
-    precomputed = st.session_state.get("precomputed_results", {})
+def _run_evaluation():
+    ss = st.session_state
+    real = ss["real_df"]
+    synths = ss["synth_dfs"]
+    col_types = ss["col_types"]
+    precomputed = ss.get("precomputed_results", {})
 
     fidelity_results = {}
     missingness_results = {}
@@ -330,71 +311,49 @@ def _run_evaluation(
     progress = st.sidebar.progress(0, text="Evaluating…")
     n = len(synths)
 
+    run_any_fidelity = any(ss.get(g["run_key"], True) for g in FIDELITY_GROUPS)
+    run_miss = ss.get("run_miss", True)
+
     for i, (name, synth) in enumerate(synths.items()):
         progress.progress((i) / n, text=f"Evaluating {name}…")
 
-        # Determine which groups are already covered by precomputed results so
-        # we can skip their (potentially expensive) recomputation.
         precomp = precomputed.get(name, {})
-        uni_precomputed = run_uni and bool(precomp.get("univariate"))
-        bi_precomputed = run_bi and bool(precomp.get("bivariate"))
-        multi_precomputed = run_multi and bool(precomp.get("multivariate"))
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            if run_uni or run_bi or run_multi:
+            if run_any_fidelity:
+                # Skip groups already covered by precomputed results
+                precomputed_groups = {
+                    g["key"]: ss.get(g["run_key"], True) and bool(precomp.get(g["key"]))
+                    for g in FIDELITY_GROUPS
+                }
                 res = evaluate_fidelity(
                     real, synth, col_types=col_types,
-                    run_univariate=run_uni and not uni_precomputed,
-                    run_bivariate=run_bi and not bi_precomputed,
-                    run_multivariate=run_multi and not multi_precomputed,
+                    **{
+                        f"run_{g['key']}": ss.get(g["run_key"], True) and not precomputed_groups[g["key"]]
+                        for g in FIDELITY_GROUPS
+                    },
                 )
-                # Inject precomputed groups into the result
-                if uni_precomputed:
-                    res.setdefault("univariate", {}).update(precomp["univariate"])
-                if bi_precomputed:
-                    res.setdefault("bivariate", {}).update(precomp["bivariate"])
-                if multi_precomputed:
-                    res.setdefault("multivariate", {}).update(precomp["multivariate"])
+                # Inject precomputed groups
+                for g in FIDELITY_GROUPS:
+                    if precomputed_groups[g["key"]]:
+                        res.setdefault(g["key"], {}).update(precomp[g["key"]])
 
-                # Post-filter individual sub-metrics the user deselected
-                if "univariate" in res:
-                    if not run_wd:
-                        res["univariate"].pop("wasserstein", None)
-                    if not run_tvd:
-                        res["univariate"].pop("tvd", None)
-                    if not run_hd:
-                        res["univariate"].pop("hellinger", None)
-                    if not res["univariate"]:
-                        del res["univariate"]
-                if "bivariate" in res:
-                    if not run_spearman:
-                        res["bivariate"].pop("spearman", None)
-                    if not run_contingency:
-                        res["bivariate"].pop("contingency", None)
-                    if not run_pcd:
-                        res["bivariate"].pop("pcd", None)
-                    if not res["bivariate"]:
-                        del res["bivariate"]
-                if "multivariate" in res:
-                    if not run_cc:
-                        res["multivariate"].pop("auc_roc", None)
-                    if not run_pmse:
-                        res["multivariate"].pop("propensity_mse", None)
-                    if not run_crcl_rs:
-                        res["multivariate"].pop("crcl_rs", None)
-                    if not run_crcl_sr:
-                        res["multivariate"].pop("crcl_sr", None)
-                    if not res["multivariate"]:
-                        del res["multivariate"]
+                # Post-filter sub-metrics the user deselected
+                for g in FIDELITY_GROUPS:
+                    if g["key"] in res:
+                        for m in g["metrics"]:
+                            if not ss.get(m["run_key"], True):
+                                res[g["key"]].pop(m["key"], None)
+                        if not res[g["key"]]:
+                            del res[g["key"]]
+
                 fidelity_results[name] = res
+
             if run_miss:
                 missingness_results[name] = evaluate_missingness(
                     real, synth, col_types=col_types,
-                    run_rate=run_miss_rate,
-                    run_set_distribution=run_miss_set,
-                    run_missing_auroc=run_miss_auroc,
-                    run_dependency_structure=run_miss_dep,
+                    **{f"run_{m['key']}": ss.get(m["run_key"], True) for m in MISSINGNESS_METRICS},
                 )
 
     progress.progress(1.0, text="Done.")
@@ -427,22 +386,13 @@ def _score_badge(label: str, score: float):
 def _weight_controls():
     """Render weight sliders in an expander. Called once before the tab layout."""
     ss = st.session_state
-    run_uni = ss.get("run_uni", True)
-    run_bi = ss.get("run_bi", True)
-    run_multi = ss.get("run_multi", True)
-    run_miss = ss.get("run_miss", True)
-
-    # A fidelity group only contributes if it has at least one sub-metric enabled
-    uni_active = run_uni and (ss.get("run_wd", True) or ss.get("run_tvd", True) or ss.get("run_hd", True))
-    bi_active = run_bi and (ss.get("run_spearman", True) or ss.get("run_contingency", True) or ss.get("run_pcd", True))
-    multi_active = run_multi and (ss.get("run_cc", True) or ss.get("run_pmse", True) or ss.get("run_crcl_rs", True) or ss.get("run_crcl_sr", True))
-    has_fidelity = uni_active or bi_active or multi_active
-
-    miss_rate_active = run_miss and ss.get("run_miss_rate", True)
-    miss_set_active = run_miss and ss.get("run_miss_set", True)
-    miss_auroc_active = run_miss and ss.get("run_miss_auroc", True)
-    miss_dep_active = run_miss and ss.get("run_miss_dep", True)
-    has_missingness = miss_rate_active or miss_set_active or miss_auroc_active or miss_dep_active
+    active_fid_groups = [g for g in FIDELITY_GROUPS if group_is_active(g, ss)]
+    active_miss_metrics = [
+        m for m in MISSINGNESS_METRICS
+        if ss.get("run_miss", True) and ss.get(m["run_key"], True)
+    ]
+    has_fidelity = bool(active_fid_groups)
+    has_missingness = bool(active_miss_metrics)
 
     with st.expander("Weighting scheme", expanded=False):
         st.caption(
@@ -453,35 +403,17 @@ def _weight_controls():
         with weight_cols[0]:
             st.markdown("**Fidelity weights**")
             if has_fidelity:
-                if uni_active:
-                    st.slider("Univariate", 0.0, 1.0, DEFAULT_FIDELITY_WEIGHTS[0], 0.01, key="w_uni")
-                    if ss.get("run_wd", True):
-                        st.slider("↳ Wasserstein", 0.0, 1.0, 1.0, 0.01, key="w_wd_metric")
-                    if ss.get("run_tvd", True):
-                        st.slider("↳ TVD", 0.0, 1.0, 1.0, 0.01, key="w_tvd_metric")
-                    if ss.get("run_hd", True):
-                        st.slider("↳ Hellinger", 0.0, 1.0, 1.0, 0.01, key="w_hd_metric")
-                if bi_active:
-                    st.slider("Bivariate", 0.0, 1.0, DEFAULT_FIDELITY_WEIGHTS[1], 0.01, key="w_bi")
-                    active_bi = [l for k, l in [("run_spearman", "Spearman"), ("run_contingency", "Contingency"), ("run_pcd", "PCD")] if ss.get(k, True)]
-                    st.caption("Includes: " + " + ".join(active_bi) if active_bi else "")
-                if multi_active:
-                    st.slider("Multivariate", 0.0, 1.0, DEFAULT_FIDELITY_WEIGHTS[2], 0.01, key="w_multi")
-                    active_multi = [l for k, l in [("run_cc", "AUC-ROC"), ("run_pmse", "pMSE"), ("run_crcl_rs", "CrCl-RS"), ("run_crcl_sr", "CrCl-SR")] if ss.get(k, True)]
-                    st.caption("Includes: " + " + ".join(active_multi) if active_multi else "")
+                for g in active_fid_groups:
+                    st.slider(g["label"], 0.0, 1.0, g["default_weight"], 0.01, key=g["w_key"])
+                    active_subs = [m["short_label"] for m in g["metrics"] if ss.get(m["run_key"], True)]
+                    st.caption("Includes: " + " + ".join(active_subs))
             else:
                 st.caption("No fidelity metrics selected.")
         with weight_cols[1]:
             st.markdown("**Missingness weights**")
             if has_missingness:
-                if miss_rate_active:
-                    st.slider("Rate", 0.0, 1.0, DEFAULT_MISSINGNESS_WEIGHTS[0], 0.01, key="w_rate")
-                if miss_set_active:
-                    st.slider("Pattern distribution", 0.0, 1.0, DEFAULT_MISSINGNESS_WEIGHTS[1], 0.01, key="w_set")
-                if miss_auroc_active:
-                    st.slider("Classifier AUROC", 0.0, 1.0, DEFAULT_MISSINGNESS_WEIGHTS[2], 0.01, key="w_auroc")
-                if miss_dep_active:
-                    st.slider("Dependency structure", 0.0, 1.0, DEFAULT_MISSINGNESS_WEIGHTS[3], 0.01, key="w_dep")
+                for m in active_miss_metrics:
+                    st.slider(m["label"], 0.0, 1.0, m["default_weight"], 0.01, key=m["w_key"])
             else:
                 st.caption("No missingness metrics selected.")
         st.markdown("**Composite axis weights**")
@@ -502,53 +434,29 @@ def _weight_controls():
             st.metric("Privacy axis", "TODO", help="Privacy metrics not yet implemented.")
 
 
-def _fidelity_sub_label(key_a: str, label_a: str, key_b: str, label_b: str) -> str:
-    """Return a caption listing which sub-metrics are active within a fidelity group."""
-    ss = st.session_state
-    active = [l for k, l in [(key_a, label_a), (key_b, label_b)] if ss.get(k, True)]
-    return "Includes: " + " + ".join(active) if active else ""
-
-
 def _get_weights() -> tuple:
     """Read the current weight values from session state for enabled metrics only."""
     ss = st.session_state
-    run_uni = ss.get("run_uni", True)
-    run_bi = ss.get("run_bi", True)
-    run_multi = ss.get("run_multi", True)
     run_miss = ss.get("run_miss", True)
 
-    uni_active = run_uni and (ss.get("run_wd", True) or ss.get("run_tvd", True) or ss.get("run_hd", True))
-    bi_active = run_bi and (ss.get("run_spearman", True) or ss.get("run_contingency", True) or ss.get("run_pcd", True))
-    multi_active = run_multi and (ss.get("run_cc", True) or ss.get("run_pmse", True) or ss.get("run_crcl_rs", True) or ss.get("run_crcl_sr", True))
-
-    miss_rate_active = run_miss and ss.get("run_miss_rate", True)
-    miss_set_active = run_miss and ss.get("run_miss_set", True)
-    miss_auroc_active = run_miss and ss.get("run_miss_auroc", True)
-    miss_dep_active = run_miss and ss.get("run_miss_dep", True)
-
     fidelity_weights = [
-        ss.get("w_uni", DEFAULT_FIDELITY_WEIGHTS[0]) if uni_active else 0.0,
-        ss.get("w_bi", DEFAULT_FIDELITY_WEIGHTS[1]) if bi_active else 0.0,
-        ss.get("w_multi", DEFAULT_FIDELITY_WEIGHTS[2]) if multi_active else 0.0,
+        ss.get(g["w_key"], g["default_weight"]) if group_is_active(g, ss) else 0.0
+        for g in FIDELITY_GROUPS
     ]
-    univariate_metric_weights = {}
-    if run_uni and ss.get("run_wd", True):
-        univariate_metric_weights["wasserstein"] = ss.get("w_wd_metric", 1.0)
-    if run_uni and ss.get("run_tvd", True):
-        univariate_metric_weights["tvd"] = ss.get("w_tvd_metric", 1.0)
-    if run_uni and ss.get("run_hd", True):
-        univariate_metric_weights["hellinger"] = ss.get("w_hd_metric", 1.0)
+
     miss_weights = [
-        ss.get("w_rate", DEFAULT_MISSINGNESS_WEIGHTS[0]) if miss_rate_active else 0.0,
-        ss.get("w_set", DEFAULT_MISSINGNESS_WEIGHTS[1]) if miss_set_active else 0.0,
-        ss.get("w_auroc", DEFAULT_MISSINGNESS_WEIGHTS[2]) if miss_auroc_active else 0.0,
-        ss.get("w_dep", DEFAULT_MISSINGNESS_WEIGHTS[3]) if miss_dep_active else 0.0,
+        ss.get(m["w_key"], m["default_weight"]) if (run_miss and ss.get(m["run_key"], True)) else 0.0
+        for m in MISSINGNESS_METRICS
     ]
+
+    any_fid_active = any(group_is_active(g, ss) for g in FIDELITY_GROUPS)
+    any_miss_active = run_miss and any(ss.get(m["run_key"], True) for m in MISSINGNESS_METRICS)
+
     composite_weights = [
-        ss.get("w_fid", DEFAULT_COMPOSITE_WEIGHTS[0]) if (uni_active or bi_active or multi_active) else 0.0,
-        ss.get("w_miss", DEFAULT_COMPOSITE_WEIGHTS[1]) if (miss_rate_active or miss_set_active or miss_auroc_active or miss_dep_active) else 0.0,
+        ss.get("w_fid", DEFAULT_COMPOSITE_WEIGHTS[0]) if any_fid_active else 0.0,
+        ss.get("w_miss", DEFAULT_COMPOSITE_WEIGHTS[1]) if any_miss_active else 0.0,
     ]
-    return fidelity_weights, univariate_metric_weights, miss_weights, composite_weights
+    return fidelity_weights, miss_weights, composite_weights
 
 
 # ===========================================================================
@@ -583,9 +491,9 @@ def _tab_individual():
     st.subheader("Scores")
     score_cols = st.columns(3)
 
-    fidelity_weights, univariate_metric_weights, miss_weights, composite_weights = _get_weights()
+    fidelity_weights, miss_weights, composite_weights = _get_weights()
 
-    f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights, univariate_metric_weights=univariate_metric_weights) if fid_res else {}
+    f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights) if fid_res else {}
     m_scores = compute_missingness_score(miss_res, weights=miss_weights) if miss_res else {}
 
     with score_cols[0]:
@@ -882,7 +790,7 @@ def _tab_benchmarking():
         st.info("Run evaluation first (sidebar → **▶ Run evaluation**).")
         return
 
-    fidelity_weights, univariate_metric_weights, miss_weights, composite_weights = _get_weights()
+    fidelity_weights, miss_weights, composite_weights = _get_weights()
 
     st.divider()
 
@@ -896,7 +804,7 @@ def _tab_benchmarking():
         fid_res = fid_all.get(name, {})
         miss_res = miss_all.get(name, {})
 
-        f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights, univariate_metric_weights=univariate_metric_weights) if fid_res else {}
+        f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights) if fid_res else {}
         m_scores = compute_missingness_score(miss_res, weights=miss_weights) if miss_res else {}
         comp = compute_composite_score(f_scores, m_scores, weights=composite_weights) if (f_scores or m_scores) else {}
 
@@ -991,7 +899,7 @@ def _tab_score_summary():
         st.info("Run evaluation first (sidebar → **▶ Run evaluation**).")
         return
 
-    fidelity_weights, univariate_metric_weights, miss_weights, composite_weights = _get_weights()
+    fidelity_weights, miss_weights, composite_weights = _get_weights()
     run_names = list(synths.keys())
 
     # ------------------------------------------------------------------
@@ -1001,7 +909,7 @@ def _tab_score_summary():
     for name in run_names:
         fid_res = fid_all.get(name, {})
         miss_res = miss_all.get(name, {})
-        f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights, univariate_metric_weights=univariate_metric_weights) if fid_res else {}
+        f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights) if fid_res else {}
         m_scores = compute_missingness_score(miss_res, weights=miss_weights) if miss_res else {}
         comp = compute_composite_score(f_scores, m_scores, weights=composite_weights) if (f_scores or m_scores) else {}
         row = {"Dataset": name}
@@ -1033,20 +941,15 @@ def _tab_score_summary():
     st.subheader("Individual metric scores")
 
     metric_label_map = {
-        ("univariate", "wasserstein"): ("Wasserstein Distance", "Univariate"),
-        ("univariate", "tvd"): ("Total Variation Distance", "Univariate"),
-        ("univariate", "hellinger"): ("Hellinger Distance", "Univariate"),
-        ("bivariate", "spearman"): ("Spearman Correlation", "Bivariate"),
-        ("bivariate", "contingency"): ("Contingency Matrix", "Bivariate"),
-        ("bivariate", "pcd"): ("Pairwise Correlation Difference", "Bivariate"),
-        ("multivariate", "auc_roc"): ("AUC-ROC", "Multivariate"),
-        ("multivariate", "propensity_mse"): ("Propensity MSE", "Multivariate"),
-        ("multivariate", "crcl_rs"): ("CrCl-RS", "Multivariate"),
-        ("multivariate", "crcl_sr"): ("CrCl-SR", "Multivariate"),
-        ("missingness", "rate"): ("Missingness Rate", "Missingness"),
-        ("missingness", "set_distribution"): ("Pattern Distribution", "Missingness"),
-        ("missingness", "missing_auroc"): ("Classifier AUROC", "Missingness"),
-        ("missingness", "dependency_structure"): ("Dependency Structure", "Missingness"),
+        **{
+            (g["key"], m["key"]): (m["label"], g["label"])
+            for g in FIDELITY_GROUPS
+            for m in g["metrics"]
+        },
+        **{
+            ("missingness", m["key"]): (m["label"], "Missingness")
+            for m in MISSINGNESS_METRICS
+        },
     }
     metric_rows = []
     for (group, key), (label, group_label) in metric_label_map.items():
@@ -1135,15 +1038,17 @@ def _tab_score_summary():
     # Build per-variable table
     # ------------------------------------------------------------------
     # Normalised weights for group-level fidelity
-    fid_group_names = ["univariate", "bivariate", "multivariate"]
-    fid_group_w_raw = dict(zip(fid_group_names, fidelity_weights))
+    fid_group_w_raw = {g["key"]: w for g, w in zip(FIDELITY_GROUPS, fidelity_weights)}
 
-    # Normalised weights within univariate metrics
-    uni_metric_w_norm = _norm_dict(univariate_metric_weights) if univariate_metric_weights else {}
+    # Equal weighting across active univariate metrics
+    uni_group = next(g for g in FIDELITY_GROUPS if g["key"] == "univariate")
+    n_active_uni = sum(
+        1 for m in uni_group["metrics"]
+        if any(m["key"] in fid_all.get(n, {}).get("univariate", {}) for n in run_names)
+    )
 
     # Normalised weights within missingness metrics
-    miss_metric_names = ["rate", "set_distribution", "missing_auroc", "dependency_structure"]
-    miss_metric_w_raw = dict(zip(miss_metric_names, miss_weights))
+    miss_metric_w_raw = {m["key"]: w for m, w in zip(MISSINGNESS_METRICS, miss_weights)}
 
     rows = []
 
@@ -1178,11 +1083,7 @@ def _tab_score_summary():
                 "Variable": var,
             }
             # Normalised weight contribution of this metric×variable to fidelity score
-            if uni_metric_w_norm and metric_key in uni_metric_w_norm:
-                metric_share = uni_metric_w_norm[metric_key]
-            else:
-                n_active = len(uni_metric_w_norm) if uni_metric_w_norm else 1
-                metric_share = 1.0 / n_active if n_active else 0.0
+            metric_share = 1.0 / n_active_uni if n_active_uni else 0.0
             row["Metric weight (in univariate)"] = f"{metric_share:.3f}"
 
             for name in run_names:
@@ -1197,8 +1098,8 @@ def _tab_score_summary():
     # --- Group-level summary rows for bivariate, multivariate, missingness ---
     # Normalised fidelity group weights (only present groups)
     present_fid_groups = [
-        g for g in fid_group_names
-        if any(g in fid_all.get(n, {}) for n in run_names)
+        g["key"] for g in FIDELITY_GROUPS
+        if any(g["key"] in fid_all.get(n, {}) for n in run_names)
     ]
     norm_fid_w = _norm_dict({g: fid_group_w_raw[g] for g in present_fid_groups if fid_group_w_raw.get(g, 0) > 0})
 
@@ -1286,15 +1187,10 @@ def _tab_score_summary():
         rows.append(row)
 
     # --- Missingness metric rows ---
-    miss_label_map = {
-        "rate": "Missingness Rate",
-        "set_distribution": "Missingness Pattern Distribution",
-        "missing_auroc": "Missingness Classifier AUROC",
-        "dependency_structure": "Missingness Dependency Structure",
-    }
+    miss_label_map = {m["key"]: f"Missingness {m['label']}" for m in MISSINGNESS_METRICS}
     present_miss = [
-        m for m in miss_metric_names
-        if any(m in miss_all.get(n, {}) for n in run_names)
+        m["key"] for m in MISSINGNESS_METRICS
+        if any(m["key"] in miss_all.get(n, {}) for n in run_names)
     ]
     norm_miss_w = _norm_dict({m: miss_metric_w_raw[m] for m in present_miss if miss_metric_w_raw.get(m, 0) > 0})
 
@@ -1319,7 +1215,7 @@ def _tab_score_summary():
     for name in run_names:
         fid_res = fid_all.get(name, {})
         miss_res = miss_all.get(name, {})
-        f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights, univariate_metric_weights=univariate_metric_weights) if fid_res else {}
+        f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights) if fid_res else {}
         m_scores = compute_missingness_score(miss_res, weights=miss_weights) if miss_res else {}
         comp = compute_composite_score(f_scores, m_scores, weights=composite_weights) if (f_scores or m_scores) else {}
 
@@ -1341,7 +1237,7 @@ def _tab_score_summary():
         for name in run_names:
             fid_res = fid_all.get(name, {})
             miss_res = miss_all.get(name, {})
-            f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights, univariate_metric_weights=univariate_metric_weights) if fid_res else {}
+            f_scores = compute_fidelity_score(fid_res, weights=fidelity_weights) if fid_res else {}
             m_scores = compute_missingness_score(miss_res, weights=miss_weights) if miss_res else {}
             comp = compute_composite_score(f_scores, m_scores, weights=composite_weights) if (f_scores or m_scores) else {}
 
