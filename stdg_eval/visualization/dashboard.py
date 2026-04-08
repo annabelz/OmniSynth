@@ -189,8 +189,8 @@ def _sidebar():
                     st.session_state["run_pcd"] = fc.run_pcd
                     st.session_state["run_cc"] = fc.run_auc_roc
                     st.session_state["run_pmse"] = fc.run_propensity_mse
-                    st.session_state["run_crcl_rs"] = fc.run_crcl_rs
-                    st.session_state["run_crcl_sr"] = fc.run_crcl_sr
+                    # st.session_state["run_crcl_rs"] = fc.run_crcl_rs
+                    # st.session_state["run_crcl_sr"] = fc.run_crcl_sr
                     st.session_state["run_miss_rate"] = mc.run_rate
                     st.session_state["run_miss_set"] = mc.run_set_distribution
                     st.session_state["run_miss_auroc"] = mc.run_missing_auroc
@@ -641,8 +641,10 @@ def _tab_individual():
         with st.expander("Multivariate metrics", expanded=True):
             cc_res = fid_res["multivariate"].get("auc_roc")
             pmse_res = fid_res["multivariate"].get("propensity_mse")
-            crcl_rs_res = fid_res["multivariate"].get("crcl_rs")
-            crcl_sr_res = fid_res["multivariate"].get("crcl_sr")
+            # crcl_rs_res = fid_res["multivariate"].get("crcl_rs")
+            # crcl_sr_res = fid_res["multivariate"].get("crcl_sr")
+            crcl_rs_res = None
+            crcl_sr_res = None
 
             m_cols = st.columns(2)
             if cc_res:
@@ -1205,8 +1207,8 @@ def _tab_score_summary():
     for group_key, group_label, sub_key in [
         ("multivariate", "Multivariate (AUC-ROC)", "auc_roc"),
         ("multivariate", "Multivariate (Propensity MSE)", "propensity_mse"),
-        ("multivariate", "Multivariate (CrCl-RS)", "crcl_rs"),
-        ("multivariate", "Multivariate (CrCl-SR)", "crcl_sr"),
+        # ("multivariate", "Multivariate (CrCl-RS)", "crcl_rs"),
+        # ("multivariate", "Multivariate (CrCl-SR)", "crcl_sr"),
     ]:
         if not any(sub_key in fid_all.get(n, {}).get(group_key, {}) for n in run_names):
             continue
@@ -1454,8 +1456,8 @@ def _tab_metric_correlation():
             ("bivariate", "pcd", "PCD"),
             ("multivariate", "auc_roc", "AUC-ROC"),
             ("multivariate", "propensity_mse", "Propensity MSE"),
-            ("multivariate", "crcl_rs", "CrCl-RS"),
-            ("multivariate", "crcl_sr", "CrCl-SR"),
+            # ("multivariate", "crcl_rs", "CrCl-RS"),
+            # ("multivariate", "crcl_sr", "CrCl-SR"),
         ]:
             res = fres.get(group, {}).get(mkey)
             if res is not None:

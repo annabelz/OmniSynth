@@ -123,18 +123,18 @@ FIDELITY_GROUPS: list[dict] = [
                 "short_label": "pMSE",
                 "run_key": "run_pmse",
             },
-            {
-                "key": "crcl_rs",
-                "label": "CrCl-RS (train real, test synth)",
-                "short_label": "CrCl-RS",
-                "run_key": "run_crcl_rs",
-            },
-            {
-                "key": "crcl_sr",
-                "label": "CrCl-SR (train synth, test real)",
-                "short_label": "CrCl-SR",
-                "run_key": "run_crcl_sr",
-            },
+            # {
+            #     "key": "crcl_rs",
+            #     "label": "CrCl-RS (train real, test synth)",
+            #     "short_label": "CrCl-RS",
+            #     "run_key": "run_crcl_rs",
+            # },
+            # {
+            #     "key": "crcl_sr",
+            #     "label": "CrCl-SR (train synth, test real)",
+            #     "short_label": "CrCl-SR",
+            #     "run_key": "run_crcl_sr",
+            # },
         ],
     },
 ]

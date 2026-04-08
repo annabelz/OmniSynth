@@ -129,21 +129,21 @@ def evaluate_fidelity(
                 max_iter=fc.propensity_mse_max_iter,
                 random_state=cfg.random_state,
             ).evaluate(real, synthetic, col_types)
-        if fc.run_crcl_rs:
-            _log("CrCl-RS (train real, test synth)")
-            results["multivariate"]["crcl_rs"] = CrossClassificationRS(
-                test_size=fc.crcl_test_size,
-                max_depth=fc.crcl_max_depth,
-                random_state=cfg.random_state,
-                impute=fc.crcl_impute,
-            ).evaluate(real, synthetic, col_types)
-        if fc.run_crcl_sr:
-            _log("CrCl-SR (train synth, test real)")
-            results["multivariate"]["crcl_sr"] = CrossClassificationSR(
-                test_size=fc.crcl_test_size,
-                max_depth=fc.crcl_max_depth,
-                random_state=cfg.random_state,
-                impute=fc.crcl_impute,
-            ).evaluate(real, synthetic, col_types)
+        # if fc.run_crcl_rs:
+        #     _log("CrCl-RS (train real, test synth)")
+        #     results["multivariate"]["crcl_rs"] = CrossClassificationRS(
+        #         test_size=fc.crcl_test_size,
+        #         max_depth=fc.crcl_max_depth,
+        #         random_state=cfg.random_state,
+        #         impute=fc.crcl_impute,
+        #     ).evaluate(real, synthetic, col_types)
+        # if fc.run_crcl_sr:
+        #     _log("CrCl-SR (train synth, test real)")
+        #     results["multivariate"]["crcl_sr"] = CrossClassificationSR(
+        #         test_size=fc.crcl_test_size,
+        #         max_depth=fc.crcl_max_depth,
+        #         random_state=cfg.random_state,
+        #         impute=fc.crcl_impute,
+        #     ).evaluate(real, synthetic, col_types)
 
     return results
