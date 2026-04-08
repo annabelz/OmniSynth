@@ -127,10 +127,24 @@ results = evaluate_fidelity(real, synth, col_types=col_types)
 
 [`examples/example_workflow.py`](examples/example_workflow.py) is a self-contained script that demonstrates the entire programmatic API end-to-end. It:
 
-1. Generates two toy clinical datasets (`synth1` — high fidelity, `synth2` — lower fidelity) and saves them as CSVs to `examples/data/`.
+1. Generates a suite of 7 toy clinical datasets (see below) and saves them as CSVs to `examples/data/`.
 2. Writes a ready-to-use YAML config to `examples/example_config.yaml` with the absolute paths to those files.
-3. Runs fidelity and missingness evaluation on both synthetic datasets.
-4. Computes weighted scores with custom weights and prints a ranked comparison.
+3. Runs fidelity and missingness evaluation on all datasets.
+4. Prints a summary table and composite-score ranking.
+
+**Toy datasets**
+
+The real dataset (`real.csv`) contains 500 records with 6 variables (`age`, `bmi`, `sbp`, `sex`, `diagnosis`, `smoker`) and realistic missingness in `bmi` (~12 %), `sbp` (~8 %), and `smoker` (~20 %).
+
+| Dataset | Fidelity | Missingness | Description |
+|---|---|---|---|
+| `synth_ideal` | ≈ 1.0 | ≈ 1.0 | Exact copy of real — upper-bound baseline |
+| `synth_fid1` | High | High | Slight distribution shifts; missingness rates close to real |
+| `synth_miss1` | High | Lower | Real distributions; 15 % missingness in `age` and `diagnosis` instead of `bmi`/`sbp`/`smoker` |
+| `synth_fid1_miss1` | Moderate | Lower | Same slight shifts as `fid1` (independent draw) + 15 % missingness in `sbp` and `smoker` |
+| `synth_fid2` | Lower | High | Larger distribution shifts (narrower age range, shifted BMI/SBP, imbalanced categories); missingness close to real |
+| `synth_miss2` | High | Lower | Real distributions; 30 % missingness in `bmi`, `sbp`, and `smoker` |
+| `synth_fid2_miss2` | Lower | Lower | Same larger shifts as `fid2` (independent draw) + 30 % missingness in `age`, `sbp`, and `diagnosis` |
 
 ```bash
 python examples/example_workflow.py
@@ -144,23 +158,24 @@ Saved config to    examples/example_config.yaml
 Launch dashboard:  streamlit run run_dashboard.py -- --config examples/example_config.yaml
 
 Detected column types:
-  age: numerical
-  bmi: numerical
+  age: numerical  bmi: numerical  ...
+
+=================================================================
+Dataset               Fidelity  Missingness  Composite
+-----------------------------------------------------------------
+  synth_ideal           1.0000       1.0000     1.0000
+  synth_fid1            0.96xx       0.94xx     0.95xx
+  synth_miss1           0.97xx       0.81xx     0.89xx
+  synth_fid1_miss1      0.95xx       0.83xx     0.89xx
+  synth_fid2            0.78xx       0.93xx     0.85xx
+  synth_miss2           0.96xx       0.71xx     0.83xx
+  synth_fid2_miss2      0.77xx       0.69xx     0.73xx
+=================================================================
+
+Ranking (composite score):
+  #1  synth_ideal           composite=1.0000
+  #2  synth_fid1            composite=0.95xx
   ...
-
-[univariate] Wasserstein Distance: score = 0.9731
-[univariate] Total Variation Distance: score = 0.9854
-...
-
-  synth1:
-    Fidelity score   : 0.9612
-    Missingness score: 0.9480
-    Composite score  : 0.9546
-
-  synth2:
-    Fidelity score   : 0.7803
-    Missingness score: 0.7214
-    Composite score  : 0.7509
 ```
 
 After running the script, load the generated config directly into the dashboard (see below).

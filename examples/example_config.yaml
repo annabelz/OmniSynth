@@ -1,9 +1,19 @@
-real_data: /home/annabelzhu/Repositories/stdg-eval/examples/data/real.csv
+real_data: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/real.csv
 synthetic_datasets:
-- name: synth1
-  path: /home/annabelzhu/Repositories/stdg-eval/examples/data/synth1.csv
-- name: synth2
-  path: /home/annabelzhu/Repositories/stdg-eval/examples/data/synth2.csv
+- name: synth_ideal
+  path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/synth_ideal.csv
+- name: synth_fid1
+  path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/synth_fid1.csv
+- name: synth_miss1
+  path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/synth_miss1.csv
+- name: synth_fid1_miss1
+  path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/synth_fid1_miss1.csv
+- name: synth_fid2
+  path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/synth_fid2.csv
+- name: synth_miss2
+  path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/synth_miss2.csv
+- name: synth_fid2_miss2
+  path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/synth_fid2_miss2.csv
 column_types:
   age: numerical
   bmi: numerical
@@ -11,19 +21,3 @@ column_types:
   sex: categorical
   diagnosis: categorical
   smoker: categorical
-metrics:
-  # Univariate
-  wasserstein: false
-  tvd: false
-  hellinger: true
-  # Bivariate
-  spearman: true
-  contingency: true
-  # Multivariate
-  cross_classification: true
-  propensity_mse: true
-  # Missingness
-  rate: true
-  set_distribution: true
-  classifier_auroc: true
-  dependency_structure: true
