@@ -476,6 +476,61 @@ def plot_metric_correlation_heatmap(corr_df: pd.DataFrame, title: str = "Metric 
     return fig
 
 
+def plot_propensity_histogram(
+    propensity_scores: List[float],
+    labels: List[int],
+    synth_label: str = "Synthetic",
+) -> go.Figure:
+    """
+    Overlapping histogram of propensity scores (P(synthetic)) split by true label.
+
+    Real records (label=0) are shown in blue, synthetic records (label=1) in the
+    synth colour. Under perfect fidelity both distributions should centre on 0.5.
+    A vertical dashed line marks 0.5 as the ideal reference.
+    """
+    import numpy as np
+    scores = np.array(propensity_scores)
+    labs = np.array(labels)
+
+    real_scores = scores[labs == 0]
+    synth_scores = scores[labs == 1]
+
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(
+        x=real_scores,
+        name="Real",
+        marker_color=REAL_COLOR,
+        opacity=0.6,
+        nbinsx=30,
+        histnorm="probability",
+    ))
+    fig.add_trace(go.Histogram(
+        x=synth_scores,
+        name=synth_label,
+        marker_color=SYNTH_COLORS[0],
+        opacity=0.6,
+        nbinsx=30,
+        histnorm="probability",
+    ))
+    fig.add_vline(
+        x=0.5,
+        line_dash="dash",
+        line_color="grey",
+        annotation_text="0.5 (ideal)",
+        annotation_position="top right",
+    )
+    fig.update_layout(
+        barmode="overlay",
+        title="Propensity score distribution (P(synthetic))",
+        xaxis=dict(title="Propensity score", range=[0, 1]),
+        yaxis_title="Proportion",
+        legend=dict(x=0.01, y=0.99),
+        height=300,
+        margin=dict(l=40, r=20, t=50, b=40),
+    )
+    return fig
+
+
 def plot_crcl_ratios(
     per_variable: Dict[str, dict],
     mode: str,

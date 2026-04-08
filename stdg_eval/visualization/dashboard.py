@@ -647,8 +647,12 @@ def _tab_individual():
             m_cols = st.columns(2)
             if cc_res:
                 with m_cols[0]:
-                    st.metric("AUC-ROC (CV mean)",
-                              f"{cc_res.details.get('mean_auroc', 0):.4f}",
+                    std_auroc = cc_res.details.get("std_auroc")
+                    auroc_label = f"{cc_res.details.get('mean_auroc', 0):.4f}"
+                    if std_auroc is not None:
+                        auroc_label += f" ± {std_auroc:.4f}"
+                    st.metric("AUC-ROC (CV mean ± std)",
+                              auroc_label,
                               help="0.5 = indistinguishable; 1.0 = perfectly separable")
                     st.caption(f"Score: {cc_res.score:.3f}")
                     if cc_res.details.get("oob_auroc") is not None:
@@ -668,12 +672,17 @@ def _tab_individual():
                 with m_cols[1]:
                     st.metric("Propensity MSE",
                               f"{pmse_res.details.get('pmse', 0):.6f}",
-                              help="Lower = better; 0 = perfect fidelity")
-                    st.caption(f"Score: {pmse_res.score:.3f}")
+                              help="Lower = better; range [0, 0.25]; 0 = perfect fidelity")
+                    st.caption(f"Score: {pmse_res.score:.3f}  (= 1 − 4 × pMSE)")
                     st.caption(
-                        f"pMSE null baseline: {pmse_res.details.get('pmse_null', 0):.6f} | "
-                        f"ratio: {pmse_res.details.get('pmse_ratio', 0):.4f}"
+                        f"Synthetic fraction: {pmse_res.details.get('c_synthetic_fraction', 0):.3f} | "
+                        f"Worst case: {pmse_res.details.get('pmse_worst_case', 0.25):.2f}"
                     )
+                    prop_scores = pmse_res.details.get("propensity_scores")
+                    prop_labels = pmse_res.details.get("labels")
+                    if prop_scores and prop_labels:
+                        fig = P.plot_propensity_histogram(prop_scores, prop_labels, synth_label=selected)
+                        st.plotly_chart(fig, use_container_width=True)
 
             for crcl_res, mode_label in [(crcl_rs_res, "RS"), (crcl_sr_res, "SR")]:
                 if not crcl_res:
@@ -757,8 +766,13 @@ def _tab_individual():
 
 
 def go_bar_folds(fold_aurocs: list) -> "go.Figure":
-    """Small bar chart for cross-validation fold AUROCs."""
+    """Small bar chart for cross-validation fold AUROCs with mean ± std error band."""
     import plotly.graph_objects as go
+    import numpy as np
+
+    mean_val = float(np.mean(fold_aurocs))
+    std_val = float(np.std(fold_aurocs))
+
     fig = go.Figure(go.Bar(
         x=[f"Fold {i+1}" for i in range(len(fold_aurocs))],
         y=fold_aurocs,
@@ -766,10 +780,31 @@ def go_bar_folds(fold_aurocs: list) -> "go.Figure":
     ))
     fig.add_hline(y=0.5, line_dash="dash", line_color="grey",
                   annotation_text="0.5 (ideal)", annotation_position="top right")
+    # Mean line with ± 1 std shaded band
+    fig.add_hline(
+        y=mean_val,
+        line_dash="solid",
+        line_color="darkorange",
+        line_width=1.5,
+        annotation_text=f"mean={mean_val:.3f}",
+        annotation_position="top left",
+        annotation_font_color="darkorange",
+    )
+    fig.add_hrect(
+        y0=mean_val - std_val,
+        y1=mean_val + std_val,
+        fillcolor="darkorange",
+        opacity=0.12,
+        line_width=0,
+        annotation_text=f"±1 std ({std_val:.3f})",
+        annotation_position="bottom right",
+        annotation_font_color="darkorange",
+        annotation_font_size=10,
+    )
     fig.update_layout(
         title="AUROC per CV fold",
         yaxis=dict(range=[0, 1], title="AUROC"),
-        height=250,
+        height=280,
         margin=dict(l=40, r=20, t=50, b=40),
     )
     return fig

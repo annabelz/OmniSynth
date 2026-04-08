@@ -4,7 +4,6 @@ Multivariate fidelity metrics.
 AucRoc  — discriminator AUROC (can real be told apart from synthetic?)
 PropensityMSE        — propensity score MSE
 """
-# TODO: revise the implementation 
 
 from __future__ import annotations
 
@@ -100,12 +99,14 @@ class AucRoc(BaseMetric):
         self,
         model: str = "rf",
         n_estimators: int = 100,
+        max_depth: int = 3,
         cv_folds: int = 5,
         random_state: int = 42,
         impute: bool = False,
     ) -> None:
         self.model = model
         self.n_estimators = n_estimators
+        self.max_depth = max_depth
         self.cv_folds = cv_folds
         self.random_state = random_state
         self.impute = impute
@@ -134,6 +135,7 @@ class AucRoc(BaseMetric):
         if self.model == "rf":
             clf = RandomForestClassifier(
                 n_estimators=self.n_estimators,
+                max_depth=self.max_depth,
                 random_state=self.random_state,
                 n_jobs=-1,
                 oob_score=True,
@@ -187,31 +189,35 @@ class PropensityMSE(BaseMetric):
     Approach
     --------
     1. Combine real (label=0) and synthetic (label=1) samples.
-    2. Fit a propensity model (logistic regression or RF) to predict P(synthetic).
-    3. pMSE = mean((p_i − 0.5)²) across all N+M samples.
-       Under perfect fidelity, P(synthetic) ≈ 0.5 everywhere → pMSE ≈ 0.
+    2. Fit a logistic regression classifier (default) via 5-fold cross-validation
+       to predict P(synthetic) for each record.
+    3. pMSE = (1/N) Σ (p̂_i − 0.5)²  following Woo et al. (2009).
+       Under perfect fidelity P(synthetic) ≈ 0.5 everywhere → pMSE ≈ 0.
+       Worst case: all records perfectly classified → pMSE = 0.25.
 
-    Normalisation
-    -------------
-    Following Snoke et al. (2017), we normalise by the theoretical null pMSE:
+    Score
+    -----
+    Raw pMSE ∈ [0, 0.25] is linearly mapped to a score ∈ [1, 0]:
 
-        c = n_synthetic / (n_real + n_synthetic)
-        pMSE_null = c × (1 − c)     # ≈ 0.25 when n_real = n_synthetic
+        score = 1 − 4 × pMSE
 
-    Propensity scores are computed via k-fold cross-validation to avoid overfitting
-    on the training data (which would inflate pMSE for flexible models).
-
-        score = max(0, 1 − pMSE / pMSE_null)
+    so score = 1 when pMSE = 0 (indistinguishable) and score = 0 when
+    pMSE = 0.25 (perfectly separable).
 
     References
     ----------
-    Snoke et al. (2017) "General and specific utility measures for synthetic data."
+    Woo MJ et al. (2009) "Global measures of data utility for microdata masked
+    for disclosure limitation." Journal of Privacy and Confidentiality, 1(1).
+
+    Lautrup AD et al. (2025) "SynthEval: A Framework for Detailed Utility and
+    Privacy Evaluation of Tabular Synthetic Data." Data Min Knowl Disc, 39(1).
     """
 
     name = "Propensity MSE"
     description = (
-        "Propensity score MSE: measures how well a classifier can assign samples to "
-        "'real' vs 'synthetic'. Lower pMSE → better fidelity → higher score."
+        "Propensity score MSE (Woo et al. 2009): measures how well a logistic "
+        "regression can distinguish real from synthetic records via 5-fold CV. "
+        "pMSE ∈ [0, 0.25]; score = 1 − 4 × pMSE."
     )
     axis = "fidelity"
 
@@ -222,12 +228,14 @@ class PropensityMSE(BaseMetric):
         max_iter: int = 1000,
         cv_folds: int = 5,
         random_state: int = 42,
+        impute: bool = False,
     ) -> None:
         self.model = model
         self.n_estimators = n_estimators
         self.max_iter = max_iter
         self.cv_folds = cv_folds
         self.random_state = random_state
+        self.impute = impute
 
     def evaluate(
         self,
@@ -235,8 +243,8 @@ class PropensityMSE(BaseMetric):
         synthetic: pd.DataFrame,
         col_types: ColumnTypes,
     ) -> MetricResult:
-        r_enc = _encode_for_sklearn(real, col_types)
-        s_enc = _encode_for_sklearn(synthetic, col_types)
+        r_enc = _encode_for_sklearn(real, col_types, impute=self.impute)
+        s_enc = _encode_for_sklearn(synthetic, col_types, impute=self.impute)
 
         all_cols = sorted(set(r_enc.columns) | set(s_enc.columns))
         r_enc = r_enc.reindex(columns=all_cols, fill_value=0)
@@ -245,26 +253,24 @@ class PropensityMSE(BaseMetric):
         X = pd.concat([r_enc, s_enc], ignore_index=True).values
         y = np.array([0] * len(r_enc) + [1] * len(s_enc))
 
-        # Theoretical null pMSE (Snoke et al. 2018)
-        c = len(s_enc) / (len(r_enc) + len(s_enc))
-        pmse_null = float(c * (1.0 - c))
-
         # Compute propensity scores via k-fold cross-validation to avoid overfitting
         clf = self._build_model()
         cv = StratifiedKFold(n_splits=self.cv_folds, shuffle=True, random_state=self.random_state)
         propensities = cross_val_predict(clf, X, y, cv=cv, method="predict_proba")[:, 1]
 
         pmse = float(np.mean((propensities - 0.5) ** 2))
-        score = float(1.0 - pmse / pmse_null) if pmse_null > 1e-10 else 1.0
+        # Linear mapping: pMSE=0 → score=1, pMSE=0.25 → score=0
+        score = float(1.0 - 4.0 * pmse)
 
         return MetricResult(
             metric_name=self.name,
             score=max(0.0, min(1.0, score)),
             details={
                 "pmse": pmse,
-                "pmse_null_theoretical": pmse_null,
-                "pmse_ratio": pmse / (pmse_null + 1e-10),
-                "c_synthetic_fraction": c,
+                "pmse_worst_case": 0.25,
+                "c_synthetic_fraction": len(s_enc) / len(X),
+                "propensity_scores": propensities.tolist(),
+                "labels": y.tolist(),
             },
         )
 
