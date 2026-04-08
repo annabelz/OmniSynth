@@ -28,7 +28,7 @@ def evaluate_missingness(
     config: Optional[EvalConfig] = None,
     run_rate: bool = True,
     run_set_distribution: bool = True,
-    run_classifier_auroc: bool = True,
+    run_missing_auroc: bool = True,
     run_dependency_structure: bool = True,
     verbose: bool = False,
 ) -> MissingnessResults:
@@ -46,14 +46,14 @@ def evaluate_missingness(
         Optional column type mapping. Inferred from *real* if not provided.
     config:
         Optional :class:`~stdg_eval.config.EvalConfig`. Uses defaults otherwise.
-    run_rate, run_set_distribution, run_classifier_auroc, run_dependency_structure:
+    run_rate, run_set_distribution, run_missing_auroc, run_dependency_structure:
         Flags to selectively disable individual metrics.
 
     Returns
     -------
     MissingnessResults
         Flat dict: ``{"rate": MetricResult, "set_distribution": MetricResult,
-                      "classifier_auroc": MetricResult, "dependency_structure": MetricResult}``
+                      "missing_auroc": MetricResult, "dependency_structure": MetricResult}``
     """
     cfg = config or DEFAULT_CONFIG
     mc = cfg.missingness
@@ -76,9 +76,9 @@ def evaluate_missingness(
             real, synthetic, col_types
         )
 
-    if run_classifier_auroc and mc.run_classifier_auroc:
+    if run_missing_auroc and mc.run_missing_auroc:
         _log("Classifier AUROC")
-        results["classifier_auroc"] = MissingnessClassifierAUROC(
+        results["missing_auroc"] = MissingnessClassifierAUROC(
             model=mc.classifier_model,
             max_iter=mc.classifier_max_iter,
             n_estimators=mc.classifier_n_estimators,

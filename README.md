@@ -92,7 +92,7 @@ Each value in the nested dict is a `MetricResult` with:
 from stdg_eval import evaluate_missingness
 
 miss_results = evaluate_missingness(real, synth)
-# returns: {"rate": MetricResult, "set_distribution": ..., "classifier_auroc": ..., "dependency_structure": ...}
+# returns: {"rate": MetricResult, "set_distribution": ..., "missing_auroc": ..., "dependency_structure": ...}
 ```
 
 > **Important:** pass the datasets with their original missing values intact — do **not** impute before calling this function.
@@ -106,7 +106,7 @@ from stdg_eval import compute_fidelity_score, compute_missingness_score, compute
 fidelity_score = compute_fidelity_score(results, weights=[0.2, 0.2, 0.6])
 print(fidelity_score["overall"])   # e.g. 0.847
 
-# Custom weights: [rate, set_distribution, classifier_auroc, dependency_structure]
+# Custom weights: [rate, set_distribution, missing_auroc, dependency_structure]
 miss_score = compute_missingness_score(miss_results, weights=[0.3, 0.3, 0.2, 0.2])
 
 # Composite score (fidelity + missingness axes)

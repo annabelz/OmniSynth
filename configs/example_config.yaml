@@ -46,5 +46,5 @@ synthetic_datasets:
 #   # Missingness
 #   rate: true
 #   set_distribution: true
-#   classifier_auroc: true
+#   missing_auroc: true
 #   dependency_structure: true

@@ -184,9 +184,11 @@ def _sidebar():
                     st.session_state["run_pcd"] = fc.run_pcd
                     st.session_state["run_cc"] = fc.run_auc_roc
                     st.session_state["run_pmse"] = fc.run_propensity_mse
+                    st.session_state["run_crcl_rs"] = fc.run_crcl_rs
+                    st.session_state["run_crcl_sr"] = fc.run_crcl_sr
                     st.session_state["run_miss_rate"] = mc.run_rate
                     st.session_state["run_miss_set"] = mc.run_set_distribution
-                    st.session_state["run_miss_auroc"] = mc.run_classifier_auroc
+                    st.session_state["run_miss_auroc"] = mc.run_missing_auroc
                     st.session_state["run_miss_dep"] = mc.run_dependency_structure
                 st.session_state["_config_hash"] = cfg_hash
             except Exception as e:
@@ -272,6 +274,8 @@ def _sidebar():
         run_multi = st.checkbox("Multivariate", value=True, key="run_multi")
         run_cc = st.checkbox("↳ AUC-ROC", value=True, key="run_cc", disabled=not run_multi)
         run_pmse = st.checkbox("↳ Propensity MSE", value=True, key="run_pmse", disabled=not run_multi)
+        run_crcl_rs = st.checkbox("↳ CrCl-RS (train real, test synth)", value=True, key="run_crcl_rs", disabled=not run_multi)
+        run_crcl_sr = st.checkbox("↳ CrCl-SR (train synth, test real)", value=True, key="run_crcl_sr", disabled=not run_multi)
 
         run_miss = st.checkbox("Missingness", value=True, key="run_miss")
         run_miss_rate = st.checkbox("↳ Rate", value=True, key="run_miss_rate", disabled=not run_miss)
@@ -294,7 +298,7 @@ def _sidebar():
             run_uni, run_bi, run_multi, run_miss,
             run_wd, run_tvd, run_hd,
             run_spearman, run_contingency, run_pcd,
-            run_cc, run_pmse,
+            run_cc, run_pmse, run_crcl_rs, run_crcl_sr,
             run_miss_rate, run_miss_set, run_miss_auroc, run_miss_dep,
         )
 
@@ -303,7 +307,7 @@ def _run_evaluation(
     run_uni, run_bi, run_multi, run_miss,
     run_wd=True, run_tvd=True, run_hd=True,
     run_spearman=True, run_contingency=True, run_pcd=True,
-    run_cc=True, run_pmse=True,
+    run_cc=True, run_pmse=True, run_crcl_rs=True, run_crcl_sr=True,
     run_miss_rate=True, run_miss_set=True, run_miss_auroc=True, run_miss_dep=True,
 ):
     real = st.session_state["real_df"]
@@ -377,6 +381,10 @@ def _run_evaluation(
                         res["multivariate"].pop("auc_roc", None)
                     if not run_pmse:
                         res["multivariate"].pop("propensity_mse", None)
+                    if not run_crcl_rs:
+                        res["multivariate"].pop("crcl_rs", None)
+                    if not run_crcl_sr:
+                        res["multivariate"].pop("crcl_sr", None)
                     if not res["multivariate"]:
                         del res["multivariate"]
                 fidelity_results[name] = res
@@ -385,7 +393,7 @@ def _run_evaluation(
                     real, synth, col_types=col_types,
                     run_rate=run_miss_rate,
                     run_set_distribution=run_miss_set,
-                    run_classifier_auroc=run_miss_auroc,
+                    run_missing_auroc=run_miss_auroc,
                     run_dependency_structure=run_miss_dep,
                 )
 
@@ -724,6 +732,8 @@ def _tab_individual():
         with st.expander("Multivariate metrics", expanded=True):
             cc_res = fid_res["multivariate"].get("auc_roc")
             pmse_res = fid_res["multivariate"].get("propensity_mse")
+            crcl_rs_res = fid_res["multivariate"].get("crcl_rs")
+            crcl_sr_res = fid_res["multivariate"].get("crcl_sr")
 
             m_cols = st.columns(2)
             if cc_res:
@@ -755,6 +765,32 @@ def _tab_individual():
                         f"pMSE null baseline: {pmse_res.details.get('pmse_null', 0):.6f} | "
                         f"ratio: {pmse_res.details.get('pmse_ratio', 0):.4f}"
                     )
+
+            for crcl_res, mode_label in [(crcl_rs_res, "RS"), (crcl_sr_res, "SR")]:
+                if not crcl_res:
+                    continue
+                per_var = crcl_res.details.get("per_variable", {})
+                mean_ratio = crcl_res.details.get("mean_ratio")
+                skipped = crcl_res.details.get("skipped", [])
+                st.markdown(f"**CrCl-{mode_label}**")
+                info_cols = st.columns(2)
+                with info_cols[0]:
+                    st.metric(
+                        f"CrCl-{mode_label} score",
+                        f"{crcl_res.score:.4f}",
+                        help="1 = ratio of 1.0 (perfect transfer); 0 = large deviation from 1",
+                    )
+                with info_cols[1]:
+                    if mean_ratio is not None:
+                        st.metric("Mean ratio (perf_other / perf_held)", f"{mean_ratio:.4f}",
+                                  help="Ratio > 1: synthetic generalises better than held-out real; < 1: worse")
+                if skipped:
+                    st.caption(f"Skipped columns: {', '.join(skipped)}")
+                if per_var:
+                    fig = P.plot_crcl_scores(per_var, mode=mode_label, synth_label=selected)
+                    st.plotly_chart(fig, use_container_width=True)
+                    fig = P.plot_crcl_ratios(per_var, mode=mode_label, synth_label=selected)
+                    st.plotly_chart(fig, use_container_width=True)
 
     # ------------------------------------------------------------------
     # Missingness
@@ -1004,9 +1040,11 @@ def _tab_score_summary():
         ("bivariate", "pcd"): ("Pairwise Correlation Difference", "Bivariate"),
         ("multivariate", "auc_roc"): ("AUC-ROC", "Multivariate"),
         ("multivariate", "propensity_mse"): ("Propensity MSE", "Multivariate"),
+        ("multivariate", "crcl_rs"): ("CrCl-RS", "Multivariate"),
+        ("multivariate", "crcl_sr"): ("CrCl-SR", "Multivariate"),
         ("missingness", "rate"): ("Missingness Rate", "Missingness"),
         ("missingness", "set_distribution"): ("Pattern Distribution", "Missingness"),
-        ("missingness", "classifier_auroc"): ("Classifier AUROC", "Missingness"),
+        ("missingness", "missing_auroc"): ("Classifier AUROC", "Missingness"),
         ("missingness", "dependency_structure"): ("Dependency Structure", "Missingness"),
     }
     metric_rows = []
@@ -1103,7 +1141,7 @@ def _tab_score_summary():
     uni_metric_w_norm = _norm_dict(univariate_metric_weights) if univariate_metric_weights else {}
 
     # Normalised weights within missingness metrics
-    miss_metric_names = ["rate", "set_distribution", "classifier_auroc", "dependency_structure"]
+    miss_metric_names = ["rate", "set_distribution", "missing_auroc", "dependency_structure"]
     miss_metric_w_raw = dict(zip(miss_metric_names, miss_weights))
 
     rows = []
@@ -1230,6 +1268,8 @@ def _tab_score_summary():
     for group_key, group_label, sub_key in [
         ("multivariate", "Multivariate (AUC-ROC)", "auc_roc"),
         ("multivariate", "Multivariate (Propensity MSE)", "propensity_mse"),
+        ("multivariate", "Multivariate (CrCl-RS)", "crcl_rs"),
+        ("multivariate", "Multivariate (CrCl-SR)", "crcl_sr"),
     ]:
         if not any(sub_key in fid_all.get(n, {}).get(group_key, {}) for n in run_names):
             continue
@@ -1248,7 +1288,7 @@ def _tab_score_summary():
     miss_label_map = {
         "rate": "Missingness Rate",
         "set_distribution": "Missingness Pattern Distribution",
-        "classifier_auroc": "Missingness Classifier AUROC",
+        "missing_auroc": "Missingness Classifier AUROC",
         "dependency_structure": "Missingness Dependency Structure",
     }
     present_miss = [
@@ -1482,6 +1522,8 @@ def _tab_metric_correlation():
             ("bivariate", "pcd", "PCD"),
             ("multivariate", "auc_roc", "AUC-ROC"),
             ("multivariate", "propensity_mse", "Propensity MSE"),
+            ("multivariate", "crcl_rs", "CrCl-RS"),
+            ("multivariate", "crcl_sr", "CrCl-SR"),
         ]:
             res = fres.get(group, {}).get(mkey)
             if res is not None:
