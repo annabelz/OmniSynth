@@ -435,7 +435,7 @@ def _weight_controls():
     # A fidelity group only contributes if it has at least one sub-metric enabled
     uni_active = run_uni and (ss.get("run_wd", True) or ss.get("run_tvd", True) or ss.get("run_hd", True))
     bi_active = run_bi and (ss.get("run_spearman", True) or ss.get("run_contingency", True) or ss.get("run_pcd", True))
-    multi_active = run_multi and (ss.get("run_cc", True) or ss.get("run_pmse", True))
+    multi_active = run_multi and (ss.get("run_cc", True) or ss.get("run_pmse", True) or ss.get("run_crcl_rs", True) or ss.get("run_crcl_sr", True))
     has_fidelity = uni_active or bi_active or multi_active
 
     miss_rate_active = run_miss and ss.get("run_miss_rate", True)
@@ -467,7 +467,8 @@ def _weight_controls():
                     st.caption("Includes: " + " + ".join(active_bi) if active_bi else "")
                 if multi_active:
                     st.slider("Multivariate", 0.0, 1.0, DEFAULT_FIDELITY_WEIGHTS[2], 0.01, key="w_multi")
-                    st.caption(_fidelity_sub_label("run_cc", "AUC-ROC", "run_pmse", "pMSE"))
+                    active_multi = [l for k, l in [("run_cc", "AUC-ROC"), ("run_pmse", "pMSE"), ("run_crcl_rs", "CrCl-RS"), ("run_crcl_sr", "CrCl-SR")] if ss.get(k, True)]
+                    st.caption("Includes: " + " + ".join(active_multi) if active_multi else "")
             else:
                 st.caption("No fidelity metrics selected.")
         with weight_cols[1]:
@@ -518,7 +519,7 @@ def _get_weights() -> tuple:
 
     uni_active = run_uni and (ss.get("run_wd", True) or ss.get("run_tvd", True) or ss.get("run_hd", True))
     bi_active = run_bi and (ss.get("run_spearman", True) or ss.get("run_contingency", True) or ss.get("run_pcd", True))
-    multi_active = run_multi and (ss.get("run_cc", True) or ss.get("run_pmse", True))
+    multi_active = run_multi and (ss.get("run_cc", True) or ss.get("run_pmse", True) or ss.get("run_crcl_rs", True) or ss.get("run_crcl_sr", True))
 
     miss_rate_active = run_miss and ss.get("run_miss_rate", True)
     miss_set_active = run_miss and ss.get("run_miss_set", True)
