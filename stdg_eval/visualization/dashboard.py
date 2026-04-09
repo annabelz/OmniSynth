@@ -189,8 +189,8 @@ def _sidebar():
                     st.session_state["run_pcd"] = fc.run_pcd
                     st.session_state["run_cc"] = fc.run_auc_roc
                     st.session_state["run_pmse"] = fc.run_propensity_mse
-                    # st.session_state["run_crcl_rs"] = fc.run_crcl_rs
-                    # st.session_state["run_crcl_sr"] = fc.run_crcl_sr
+                    st.session_state["run_crcl_rs"] = fc.run_crcl_rs
+                    st.session_state["run_crcl_sr"] = fc.run_crcl_sr
                     st.session_state["run_miss_rate"] = mc.run_rate
                     st.session_state["run_miss_set"] = mc.run_set_distribution
                     st.session_state["run_miss_auroc"] = mc.run_missing_auroc
@@ -351,10 +351,19 @@ def _run_evaluation():
                 fidelity_results[name] = res
 
             if run_miss:
-                missingness_results[name] = evaluate_missingness(
-                    real, synth, col_types=col_types,
-                    **{f"run_{m['key']}": ss.get(m["run_key"], True) for m in MISSINGNESS_METRICS},
-                )
+                miss_precomputed = bool(precomp.get("missingness"))
+                if miss_precomputed:
+                    miss_res = dict(precomp["missingness"])
+                    # Post-filter sub-metrics the user deselected
+                    for m in MISSINGNESS_METRICS:
+                        if not ss.get(m["run_key"], True):
+                            miss_res.pop(m["key"], None)
+                    missingness_results[name] = miss_res
+                else:
+                    missingness_results[name] = evaluate_missingness(
+                        real, synth, col_types=col_types,
+                        **{f"run_{m['key']}": ss.get(m["run_key"], True) for m in MISSINGNESS_METRICS},
+                    )
 
     progress.progress(1.0, text="Done.")
     time.sleep(0.5)
@@ -641,10 +650,8 @@ def _tab_individual():
         with st.expander("Multivariate metrics", expanded=True):
             cc_res = fid_res["multivariate"].get("auc_roc")
             pmse_res = fid_res["multivariate"].get("propensity_mse")
-            # crcl_rs_res = fid_res["multivariate"].get("crcl_rs")
-            # crcl_sr_res = fid_res["multivariate"].get("crcl_sr")
-            crcl_rs_res = None
-            crcl_sr_res = None
+            crcl_rs_res = fid_res["multivariate"].get("crcl_rs")
+            crcl_sr_res = fid_res["multivariate"].get("crcl_sr")
 
             m_cols = st.columns(2)
             if cc_res:
@@ -745,17 +752,22 @@ def _tab_individual():
                 dep_cols = dep_res.details["columns"]
                 if len(dep_cols) >= 2:
                     st.markdown("**Missingness dependency structure**")
-                    dep_plot_cols = st.columns(2)
                     real_dep = pd.DataFrame(dep_res.details["real_correlation_matrix"])
                     synth_dep = pd.DataFrame(dep_res.details["synth_correlation_matrix"])
+                    dep_plot_cols = st.columns(3)
                     with dep_plot_cols[0]:
                         st.plotly_chart(
-                            P.plot_missingness_dependency(real_dep, "Real: missingness dependency"),
+                            P.plot_missingness_dependency(real_dep, "Real"),
                             use_container_width=True,
                         )
                     with dep_plot_cols[1]:
                         st.plotly_chart(
-                            P.plot_missingness_dependency(synth_dep, f"{selected}: missingness dependency"),
+                            P.plot_missingness_dependency(synth_dep, selected),
+                            use_container_width=True,
+                        )
+                    with dep_plot_cols[2]:
+                        st.plotly_chart(
+                            P.plot_missingness_dependency_diff(real_dep, synth_dep, "Difference (real − synth)"),
                             use_container_width=True,
                         )
 
@@ -1207,8 +1219,8 @@ def _tab_score_summary():
     for group_key, group_label, sub_key in [
         ("multivariate", "Multivariate (AUC-ROC)", "auc_roc"),
         ("multivariate", "Multivariate (Propensity MSE)", "propensity_mse"),
-        # ("multivariate", "Multivariate (CrCl-RS)", "crcl_rs"),
-        # ("multivariate", "Multivariate (CrCl-SR)", "crcl_sr"),
+        ("multivariate", "Multivariate (CrCl-RS)", "crcl_rs"),
+        ("multivariate", "Multivariate (CrCl-SR)", "crcl_sr"),
     ]:
         if not any(sub_key in fid_all.get(n, {}).get(group_key, {}) for n in run_names):
             continue
@@ -1456,8 +1468,8 @@ def _tab_metric_correlation():
             ("bivariate", "pcd", "PCD"),
             ("multivariate", "auc_roc", "AUC-ROC"),
             ("multivariate", "propensity_mse", "Propensity MSE"),
-            # ("multivariate", "crcl_rs", "CrCl-RS"),
-            # ("multivariate", "crcl_sr", "CrCl-SR"),
+            ("multivariate", "crcl_rs", "CrCl-RS"),
+            ("multivariate", "crcl_sr", "CrCl-SR"),
         ]:
             res = fres.get(group, {}).get(mkey)
             if res is not None:

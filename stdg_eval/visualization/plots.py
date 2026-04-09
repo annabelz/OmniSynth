@@ -408,6 +408,29 @@ def plot_missingness_dependency(
     return fig
 
 
+def plot_missingness_dependency_diff(
+    real_corr: pd.DataFrame,
+    synth_corr: pd.DataFrame,
+    title: str = "Absolute difference |real − synth|",
+) -> go.Figure:
+    """Heatmap of elementwise absolute difference between real and synthetic missingness correlation matrices."""
+    diff = abs(real_corr.values - synth_corr.values)
+    cols = real_corr.columns.tolist()
+    fig = go.Figure(go.Heatmap(
+        z=diff,
+        x=cols, y=cols,
+        colorscale="Reds",
+        zmin=0, zmax=float(max(diff.max(), 0.01)),
+        showscale=True,
+    ))
+    fig.update_layout(
+        title=title,
+        height=max(300, 30 * len(cols) + 80),
+        margin=dict(l=60, r=20, t=50, b=40),
+    )
+    return fig
+
+
 # ===========================================================================
 # 4. Benchmarking / scoring summary
 # ===========================================================================

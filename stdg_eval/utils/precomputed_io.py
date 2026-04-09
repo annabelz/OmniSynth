@@ -90,31 +90,31 @@ def _from_serializable(obj: Any) -> Any:
 # Public API
 # ---------------------------------------------------------------------------
 
-# All fidelity metric groups that can be precomputed
-PRECOMPUTABLE_GROUPS = ("univariate", "bivariate", "multivariate")
+# Currently supported metric groups — extend as new axes (utility, privacy, …) are added
+PRECOMPUTABLE_GROUPS = ("univariate", "bivariate", "multivariate", "missingness")
 
 
 def save_precomputed(
-    fidelity_results: Dict[str, Dict],
+    results: Dict[str, Dict],
     path: str | pathlib.Path,
     groups: tuple[str, ...] = PRECOMPUTABLE_GROUPS,
 ) -> None:
     """
-    Serialise fidelity metric results for the given groups to a JSON file.
+    Serialise metric results for the given groups to a JSON file.
 
     Parameters
     ----------
-    fidelity_results:
-        Mapping ``{synth_name: FidelityResults}`` as returned by
-        ``evaluate_fidelity``.
+    results:
+        Mapping ``{synth_name: {group: {metric_key: MetricResult}}}`` covering
+        any combination of metric groups (fidelity, missingness, utility, …).
     path:
         Destination file path (created or overwritten).
     groups:
-        Which top-level groups to include; defaults to bivariate + multivariate.
+        Which top-level groups to include; defaults to all known groups.
     """
     payload: Dict[str, Any] = {}
 
-    for synth_name, result in fidelity_results.items():
+    for synth_name, result in results.items():
         payload[synth_name] = {}
         for group in groups:
             if group not in result:

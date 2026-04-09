@@ -24,6 +24,7 @@ import sys
 import time
 import warnings
 from pathlib import Path
+from typing import Dict
 
 
 def _cmd_dashboard(args):
@@ -106,6 +107,7 @@ def _cmd_evaluate(args):
 def _cmd_precompute(args):
     import pandas as pd
     from stdg_eval.evaluation.fidelity import evaluate_fidelity
+    from stdg_eval.evaluation.missingness import evaluate_missingness
     from stdg_eval.utils.data_utils import load_config, eval_config_from_dict
     from stdg_eval.utils.precomputed_io import save_precomputed
 
@@ -118,39 +120,53 @@ def _cmd_precompute(args):
     run_uni = "univariate" in groups
     run_bi = "bivariate" in groups
     run_multi = "multivariate" in groups
+    run_miss = "missingness" in groups
 
     eval_cfg = eval_config_from_dict(cfg) if "metrics" in cfg else None
 
-    fidelity_results = {}
+    all_results = {}
     n = len(synth_entries)
     for i, (name, synth_path) in enumerate(synth_entries):
         print(f"\n[{i + 1}/{n}] {name}", flush=True)
         synth = pd.read_csv(synth_path)
 
+        combined: Dict = {}
         t0 = time.time()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            res = evaluate_fidelity(
-                real, synth,
-                col_types=col_types,
-                config=eval_cfg,
-                run_univariate=run_uni,
-                run_bivariate=run_bi,
-                run_multivariate=run_multi,
-                verbose=True,
-            )
+            if run_uni or run_bi or run_multi:
+                fid = evaluate_fidelity(
+                    real, synth,
+                    col_types=col_types,
+                    config=eval_cfg,
+                    run_univariate=run_uni,
+                    run_bivariate=run_bi,
+                    run_multivariate=run_multi,
+                    verbose=True,
+                )
+                combined.update(fid)
+            if run_miss:
+                miss = evaluate_missingness(
+                    real, synth,
+                    col_types=col_types,
+                    config=eval_cfg,
+                    verbose=True,
+                )
+                combined["missingness"] = miss
+
         elapsed = time.time() - t0
-        fidelity_results[name] = res
+        all_results[name] = combined
         score_parts = []
         for group in groups:
-            if group in res:
-                scores = [mr.score for mr in res[group].values()]
-                if scores:
-                    score_parts.append(f"{group}={sum(scores)/len(scores):.4f}")
+            if group not in combined:
+                continue
+            scores = [mr.score for mr in combined[group].values()]
+            if scores:
+                score_parts.append(f"{group}={sum(scores)/len(scores):.4f}")
         print(f"  → {', '.join(score_parts)}  | time elapsed: {elapsed:.1f}s")
 
     out = Path(args.output)
-    save_precomputed(fidelity_results, out, groups=groups)
+    save_precomputed(all_results, out, groups=groups)
     print(f"\nPrecomputed results saved to {out}")
     print("Reference in your config with:")
     print(f"  precomputed_results: {out}")
@@ -190,9 +206,10 @@ def main():
     pre_p.add_argument("--output", type=Path, required=True,
                        help="Where to write the precomputed JSON file.")
     pre_p.add_argument(
-        "--groups", nargs="+", default=["univariate", "bivariate", "multivariate"],
-        choices=["univariate", "bivariate", "multivariate"],
-        help="Which metric groups to precompute (default: all).",
+        "--groups", nargs="+",
+        default=["univariate", "bivariate", "multivariate", "missingness"],
+        help="Which metric groups to precompute (default: all). "
+             "Currently supported: univariate, bivariate, multivariate, missingness.",
     )
 
     args = parser.parse_args()
