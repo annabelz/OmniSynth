@@ -30,8 +30,10 @@ metrics:
   spearman: true
   contingency: true
   # Multivariate
-  cross_classification: true
+  auc_roc: true
   propensity_mse: true
+  crcl_rs: false
+  crcl_sr: false
   # Missingness
   rate: true
   set_distribution: true

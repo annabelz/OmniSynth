@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import warnings
 from pathlib import Path
 
@@ -70,6 +71,7 @@ def _cmd_evaluate(args):
         synth = pd.read_csv(synth_path)
 
         print(f"\n[{name}]")
+        t0 = time.time()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             fid = evaluate_fidelity(real, synth, col_types=col_types, verbose=True)
@@ -78,6 +80,7 @@ def _cmd_evaluate(args):
         f_scores = compute_fidelity_score(fid)
         m_scores = compute_missingness_score(miss)
         comp = compute_composite_score(f_scores, m_scores)
+        elapsed = time.time() - t0
 
         results[name] = {
             "fidelity_score": f_scores["overall"],
@@ -91,7 +94,8 @@ def _cmd_evaluate(args):
         }
         print(f"[{name}]  fidelity={f_scores['overall']:.4f}  "
               f"missingness={m_scores['overall']:.4f}  "
-              f"composite={comp['composite']:.4f}")
+              f"composite={comp['composite']:.4f}  "
+              f"| time elapsed: {elapsed:.1f}s")
 
     if args.output:
         out = Path(args.output)
@@ -123,6 +127,7 @@ def _cmd_precompute(args):
         print(f"\n[{i + 1}/{n}] {name}", flush=True)
         synth = pd.read_csv(synth_path)
 
+        t0 = time.time()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             res = evaluate_fidelity(
@@ -134,6 +139,7 @@ def _cmd_precompute(args):
                 run_multivariate=run_multi,
                 verbose=True,
             )
+        elapsed = time.time() - t0
         fidelity_results[name] = res
         score_parts = []
         for group in groups:
@@ -141,7 +147,7 @@ def _cmd_precompute(args):
                 scores = [mr.score for mr in res[group].values()]
                 if scores:
                     score_parts.append(f"{group}={sum(scores)/len(scores):.4f}")
-        print(f"  → {', '.join(score_parts)}")
+        print(f"  → {', '.join(score_parts)}  | time elapsed: {elapsed:.1f}s")
 
     out = Path(args.output)
     save_precomputed(fidelity_results, out, groups=groups)

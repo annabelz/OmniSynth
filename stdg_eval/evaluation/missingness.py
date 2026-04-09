@@ -77,7 +77,7 @@ def evaluate_missingness(
         )
 
     if run_missing_auroc and mc.run_missing_auroc:
-        _log("Classifier AUROC")
+        _log("Missing AUROC")
         results["missing_auroc"] = MissingnessClassifierAUROC(
             model=mc.classifier_model,
             max_iter=mc.classifier_max_iter,

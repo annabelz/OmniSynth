@@ -284,6 +284,8 @@ def eval_config_from_dict(cfg: dict) -> EvalConfig:
         run_pcd=metrics.get("pairwise_correlation_difference", True),
         run_auc_roc=metrics.get("auc_roc", True),
         run_propensity_mse=metrics.get("propensity_mse", True),
+        run_crcl_rs=metrics.get("crcl_rs", True),
+        run_crcl_sr=metrics.get("crcl_sr", True),
     )
     missingness = MissingnessConfig(
         run_rate=metrics.get("rate", True),
