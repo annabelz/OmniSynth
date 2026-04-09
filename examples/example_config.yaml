@@ -29,6 +29,7 @@ metrics:
   # Bivariate
   spearman: true
   contingency: true
+  pairwise_correlation_difference: true
   # Multivariate
   auc_roc: true
   propensity_mse: true

@@ -1,49 +1,31 @@
 # stdg-eval
 
-A modular Python library for evaluating tabular synthetic data generation, with a focus on medical / clinical datasets. Designed for reproducibility, extensibility, and interactive exploration.
+A modular Python library for evaluating tabular synthetic data, with a focus on medical / clinical datasets. Covers fidelity and missingness axes, with an interactive Streamlit dashboard and a headless CLI.
 
 ---
 
 ## Evaluation axes
 
-| Axis | Status | Description |
-|------|--------|-------------|
-| **Fidelity** | ✅ Available | How closely the synthetic data matches the statistical properties of real data |
-| **Missingness** | ✅ Available | How faithfully missing-data patterns are reproduced |
-| **Utility** | 🔜 TODO | Downstream task performance on synthetic vs real data |
-| **Privacy** | 🔜 TODO | Disclosure risk and membership inference assessments |
+| Axis | Status |
+|------|--------|
+| **Fidelity** | ✅ Available |
+| **Missingness** | ✅ Available |
+| **Utility** | 🔜 Planned |
+| **Privacy** | 🔜 Planned |
 
 ---
 
 ## Installation
 
-It is strongly recommended to install inside a **virtual environment** to keep dependencies isolated and ensure reproducibility.
-
 ```bash
 git clone https://github.com/your-org/stdg-eval.git
 cd stdg-eval
-
-# Create and activate a virtual environment (Python ≥ 3.9 required)
 python3 -m venv .venv
-source .venv/bin/activate          # macOS / Linux
-# .venv\Scripts\activate           # Windows
-
-# Install the package in editable mode (includes all dependencies)
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
-
-# Or install dependencies without editable install:
-# pip install -r requirements.txt
 ```
 
-To deactivate the virtual environment when you're done:
-
-```bash
-deactivate
-```
-
-> **Note:** The `.venv/` directory is listed in `.gitignore` and will not be committed.
-
-**Requirements:** Python ≥ 3.9, and the packages listed in `requirements.txt` (numpy, pandas, scipy, scikit-learn, plotly, streamlit, pyyaml, pyarrow).
+**Requirements:** Python ≥ 3.9. Key dependencies: numpy, pandas, scipy, scikit-learn, plotly, streamlit, pyyaml, phik.
 
 ---
 
@@ -59,152 +41,86 @@ All datasets must be **tabular CSV files** where:
 
 `stdg-eval` automatically infers whether each column is **numerical** or **categorical**:
 - Object / string / boolean columns → categorical.
-- Numeric columns with ≤ 20 unique values **and** a cardinality fraction ≤ 5% → categorical.
+- Numeric columns with ≤ 20 unique values **and** a cardinality fraction ≤ 5 % → categorical.
 - All other numeric columns → numerical.
 
 You can override this in a config file or via the dashboard sidebar.
 
 ---
 
-## Programmatic API
+## Quick start
 
-### 1. Evaluate fidelity
+### Programmatic API
 
 ```python
 import pandas as pd
-from stdg_eval import evaluate_fidelity
+from stdg_eval import (
+    evaluate_fidelity, evaluate_missingness,
+    compute_fidelity_score, compute_missingness_score, compute_composite_score,
+)
 
 real  = pd.read_csv("data/real.csv")
-synth = pd.read_csv("data/synth1.csv")
+synth = pd.read_csv("data/synth.csv")
 
-results = evaluate_fidelity(real, synth)
-# returns: {"univariate": {...}, "bivariate": {...}, "multivariate": {...}}
+fid  = evaluate_fidelity(real, synth)
+miss = evaluate_missingness(real, synth)   # pass raw data — do not impute first
+
+f_scores = compute_fidelity_score(fid)
+m_scores = compute_missingness_score(miss)
+comp     = compute_composite_score(f_scores, m_scores)
+
+print(f_scores["overall"])    # e.g. 0.847
+print(comp["composite"])      # e.g. 0.831
 ```
 
-Each value in the nested dict is a `MetricResult` with:
-- `score` — a normalised float in [0, 1] where **1 = perfect fidelity**
-- `details` — raw metric values, per-column breakdowns, matrices, etc.
-- `column_scores` — per-column scores (where applicable)
+Each `evaluate_*` function returns a dict of `MetricResult` objects with:
+- `score` — float in [0, 1], **1 = best**
+- `details` — raw values, per-column breakdowns, matrices
+- `column_scores` — per-column scores where applicable
 
-### 2. Evaluate missingness
+Custom weights can be passed to the scoring functions:
 
 ```python
-from stdg_eval import evaluate_missingness
+# weights: [univariate, bivariate, multivariate] — auto-normalised
+f_scores = compute_fidelity_score(fid, weights=[0.2, 0.2, 0.6])
 
-miss_results = evaluate_missingness(real, synth)
-# returns: {"rate": MetricResult, "set_distribution": ..., "missing_auroc": ..., "dependency_structure": ...}
+# weights: [rate, set_distribution, missing_auroc, dependency_structure]
+m_scores = compute_missingness_score(miss, weights=[0.3, 0.3, 0.2, 0.2])
+
+# weights: [fidelity, missingness]
+comp = compute_composite_score(f_scores, m_scores, weights=[0.5, 0.5])
 ```
 
-> **Important:** pass the datasets with their original missing values intact — do **not** impute before calling this function.
-
-### 3. Compute scores
-
-```python
-from stdg_eval import compute_fidelity_score, compute_missingness_score, compute_composite_score
-
-# Custom weights: [univariate, bivariate, multivariate] — auto-normalised
-fidelity_score = compute_fidelity_score(results, weights=[0.2, 0.2, 0.6])
-print(fidelity_score["overall"])   # e.g. 0.847
-
-# Custom weights: [rate, set_distribution, missing_auroc, dependency_structure]
-miss_score = compute_missingness_score(miss_results, weights=[0.3, 0.3, 0.2, 0.2])
-
-# Composite score (fidelity + missingness axes)
-composite = compute_composite_score(fidelity_score, miss_score, weights=[0.5, 0.5])
-print(composite["composite"])      # e.g. 0.831
-```
-
-### 4. Column type overrides
-
-```python
-from stdg_eval.utils import detect_column_types
-
-col_types = detect_column_types(real, override={"sex": "categorical", "age": "numerical"})
-results = evaluate_fidelity(real, synth, col_types=col_types)
-```
-
-### Full example
-
-[`examples/example_workflow.py`](examples/example_workflow.py) is a self-contained script that demonstrates the entire programmatic API end-to-end. It:
-
-1. Generates a suite of 7 toy clinical datasets (see below) and saves them as CSVs to `examples/data/`.
-2. Writes a ready-to-use YAML config to `examples/example_config.yaml` with the absolute paths to those files.
-3. Runs fidelity and missingness evaluation on all datasets.
-4. Prints a summary table and composite-score ranking.
-
-**Toy datasets**
-
-The real dataset (`real.csv`) contains 500 records with 6 variables (`age`, `bmi`, `sbp`, `sex`, `diagnosis`, `smoker`) and realistic missingness in `bmi` (~12 %), `sbp` (~8 %), and `smoker` (~20 %).
-
-| Dataset | Fidelity | Missingness | Description |
-|---|---|---|---|
-| `synth_ideal` | ≈ 1.0 | ≈ 1.0 | Exact copy of real — upper-bound baseline |
-| `synth_fid1` | High | High | Slight distribution shifts; missingness rates close to real |
-| `synth_miss1` | High | Lower | Real distributions; 15 % missingness in `age` and `diagnosis` instead of `bmi`/`sbp`/`smoker` |
-| `synth_fid1_miss1` | Moderate | Lower | Same slight shifts as `fid1` (independent draw) + 15 % missingness in `sbp` and `smoker` |
-| `synth_fid2` | Lower | High | Larger distribution shifts (narrower age range, shifted BMI/SBP, imbalanced categories); missingness close to real |
-| `synth_miss2` | High | Lower | Real distributions; 30 % missingness in `bmi`, `sbp`, and `smoker` |
-| `synth_fid2_miss2` | Lower | Lower | Same larger shifts as `fid2` (independent draw) + 30 % missingness in `age`, `sbp`, and `diagnosis` |
+### CLI
 
 ```bash
-python examples/example_workflow.py
+# Headless evaluation → JSON
+stdg-eval evaluate --config configs/my_config.yaml --output results.json
+
+# Precompute expensive metrics once, reuse in dashboard
+stdg-eval precompute --config configs/my_config.yaml --output precomputed.json
+
+# Compute only specific groups
+stdg-eval precompute --config configs/my_config.yaml --output precomputed.json \
+  --groups multivariate missingness
+
+# Launch dashboard
+stdg-eval dashboard --config configs/my_config.yaml
 ```
 
-Expected output (values will vary slightly):
+### Dashboard
 
+```bash
+# Upload files interactively
+streamlit run run_dashboard.py
+
+# Load from a config file
+streamlit run run_dashboard.py -- --config configs/my_config.yaml
 ```
-Saved datasets to  examples/data/
-Saved config to    examples/example_config.yaml
-Launch dashboard:  streamlit run run_dashboard.py -- --config examples/example_config.yaml
-
-Detected column types:
-  age: numerical  bmi: numerical  ...
-
-=================================================================
-Dataset               Fidelity  Missingness  Composite
------------------------------------------------------------------
-  synth_ideal           1.0000       1.0000     1.0000
-  synth_fid1            0.96xx       0.94xx     0.95xx
-  synth_miss1           0.97xx       0.81xx     0.89xx
-  synth_fid1_miss1      0.95xx       0.83xx     0.89xx
-  synth_fid2            0.78xx       0.93xx     0.85xx
-  synth_miss2           0.96xx       0.71xx     0.83xx
-  synth_fid2_miss2      0.77xx       0.69xx     0.73xx
-=================================================================
-
-Ranking (composite score):
-  #1  synth_ideal           composite=1.0000
-  #2  synth_fid1            composite=0.95xx
-  ...
-```
-
-After running the script, load the generated config directly into the dashboard (see below).
 
 ---
 
-## Interactive dashboard
-
-### Launch with file upload (recommended for exploration)
-
-```bash
-streamlit run run_dashboard.py
-```
-
-Then open `http://localhost:8501` in your browser. Use the sidebar to upload your CSV files directly.
-
-### Launch with the example config
-
-After running `examples/example_workflow.py`, a config file is automatically generated at `examples/example_config.yaml` with absolute paths to the toy datasets. Launch the dashboard pointed at it:
-
-```bash
-streamlit run run_dashboard.py -- --config examples/example_config.yaml
-```
-
-The datasets load automatically — click **▶ Run evaluation** in the sidebar to start.
-
-### Launch with your own config file
-
-Create a YAML config:
+## Config file
 
 ```yaml
 real_data: data/real.csv
@@ -213,54 +129,43 @@ synthetic_datasets:
     path: data/synth1.csv
   - name: synth2
     path: data/synth2.csv
-  - name: synth3
-    path: data/synth3.csv
-column_types:           # optional overrides
-  sex: categorical
+
+column_types:           # optional — auto-inferred if omitted
   age: numerical
+  sex: categorical
+
+metrics:                # optional — all true by default
+  # Univariate
+  wasserstein: true
+  tvd: true
+  hellinger: true
+  # Bivariate
+  spearman: true
+  contingency: true
+  pairwise_correlation_difference: true
+  # Multivariate
+  auc_roc: true
+  propensity_mse: true
+  crcl_rs: false        # computationally expensive — disable if not needed
+  crcl_sr: false
+  # Missingness
+  rate: true
+  set_distribution: true
+  missing_auroc: true
+  dependency_structure: true
+
+precomputed_results: precomputed.json   # optional — skip recomputation in dashboard
 ```
 
-Or a plain-text config (one path per line, `#` for comments):
+### Precomputing expensive metrics
 
-```text
-# lines starting with # are ignored
-data/real.csv
-data/synth1.csv
-data/synth2.csv
-data/synth3.csv
-```
-
-Then launch:
+Bivariate, multivariate, and missingness metrics can be slow on large datasets. Precompute them once and reload in the dashboard without re-running evaluation:
 
 ```bash
-streamlit run run_dashboard.py -- --config configs/my_config.yaml
+stdg-eval precompute --config configs/my_config.yaml --output precomputed.json
 ```
 
-### Dashboard workflow (example with 3 synthetic datasets)
-
-1. Upload `real.csv` and `synth1.csv`, `synth2.csv`, `synth3.csv` in the sidebar (or point to a config file).
-2. Optionally review and override column type assignments.
-3. Click **▶ Run evaluation** — all metrics are computed for each synthetic dataset.
-4. **Individual Report tab**: select a synthetic dataset from the dropdown to see:
-   - CDF plots for each numerical column (with Wasserstein distance annotated)
-   - Frequency bar charts for each categorical column (with TVD annotated)
-   - Side-by-side Spearman correlation heatmaps + difference heatmap
-   - Contingency table TVD per pair
-   - Cross-classification AUROC and propensity MSE results
-   - Per-variable missingness rate bar chart
-   - Missingness pattern heatmaps (real vs synthetic)
-   - Missingness dependency structure heatmaps
-5. **Benchmarking Report tab**:
-   - Adjust weight sliders for each metric group and evaluation axis.
-   - Scores and rankings update interactively.
-   - See the best-performing dataset per axis (Fidelity, Missingness, Composite).
-   - Radar chart and score table for cross-dataset comparison.
-
-### Headless evaluation (no dashboard)
-
-```bash
-stdg-eval evaluate --real data/real.csv --synth data/synth1.csv data/synth2.csv --output results.json
-```
+Reference the output in your config with `precomputed_results: precomputed.json`, or upload it via the dashboard sidebar.
 
 ---
 
@@ -268,34 +173,84 @@ stdg-eval evaluate --real data/real.csv --synth data/synth1.csv data/synth2.csv 
 
 ### Fidelity — univariate
 
-| Metric | Columns | Score normalisation |
-|--------|---------|---------------------|
-| **Wasserstein Distance** | Numerical | `exp(−WD / IQR_real)` per column; mean across columns |
-| **Total Variation Distance (TVD)** | Categorical | `1 − TVD` per column; mean across columns |
+| Metric | Applies to | Score |
+|--------|-----------|-------|
+| Wasserstein Distance | Numerical | `exp(−WD / IQR_real)` per column, mean across columns |
+| Total Variation Distance | Categorical | `1 − TVD` per column, mean across columns |
+| Hellinger Distance | All | `1 − HD` per column, mean across columns |
 
 ### Fidelity — bivariate
 
-| Metric | Columns | Score normalisation |
-|--------|---------|---------------------|
-| **Spearman Correlation** | Numerical × Numerical | `1 − mean(|ρ_real − ρ_synth|)` across all pairs |
-| **Contingency Matrix** | Categorical × Categorical, Numerical × Categorical | `1 − mean(TVD)` across all pairs |
-| **Pairwise Correlation Difference** | All | 🔜 TODO |
+| Metric | Applies to | Score |
+|--------|-----------|-------|
+| Spearman Correlation | Num × Num | `1 − mean(|ρ_real − ρ_synth|)` across pairs |
+| Contingency Matrix TVD | Cat × Cat, Num × Cat | `1 − mean(TVD)` across pairs |
+| Pairwise Correlation Difference (PCD) | All pairs (φk) | `1 − mean(|φk_real − φk_synth|)` across pairs |
+
+PCD uses the φk (phi-k) correlation coefficient — a mixed-type association measure in [0, 1]. Binning uses Scott's rule on pooled real + synthetic values. A Student's t-test flags statistically significant differences (α = 0.05).
 
 ### Fidelity — multivariate
 
-| Metric | Score normalisation |
-|--------|---------------------|
-| **Cross-Classification** | `1 − 2 × |AUROC − 0.5|` (0.5 AUROC → score = 1) |
-| **Propensity MSE** | `1 − pMSE / pMSE_null` (null = shuffled labels baseline) |
+| Metric | Score |
+|--------|-------|
+| AUC-ROC | `1 − 2×|AUROC − 0.5|` — random forest discriminator; AUROC = 0.5 → score = 1 |
+| Propensity MSE | `1 − pMSE / pMSE_null` — propensity model vs shuffled-label null baseline |
+| CrCl-RS | `max(0, 1 − |mean_ratio − 1|)` — train on real, test on synth; ratio = perf_synth / perf_real_held |
+| CrCl-SR | same formula — train on synth, test on real; ratio = perf_real / perf_synth_held |
+
+CrCl uses decision trees (accuracy for categorical targets, R² for numerical targets). A ratio of 1.0 per variable indicates perfect transfer. Reference: Goncalves et al. (2020) *BMC Med Res Methodol*.
 
 ### Missingness
 
-| Metric | Score normalisation |
-|--------|---------------------|
-| **Missingness Rate** | `1 − mean(|rate_real − rate_synth|)` across columns |
-| **Pattern Distribution** | `1 − TVD(pattern_dist_real, pattern_dist_synth)` |
-| **Classifier AUROC** | `1 − mean(|AUROC_real − AUROC_synth|)` across columns |
-| **Dependency Structure** | `1 − mean(|corr_real − corr_synth|)` across missingness indicator pairs |
+| Metric | Score |
+|--------|-------|
+| Missingness Rate | `1 − mean(|rate_real − rate_synth|)` across columns |
+| Pattern Distribution | `1 − TVD` between distributions over joint missingness patterns |
+| Missing AUROC | `1 − mean(|AUROC_real − AUROC_synth|)` — per-column missingness classifier |
+| Dependency Structure | `1 − mean(|corr_real − corr_synth|)` — Pearson correlations between binary missingness indicators |
+
+---
+
+## Example workflow
+
+[`examples/example_workflow.py`](examples/example_workflow.py) generates a suite of 7 toy clinical datasets and runs a full evaluation:
+
+```bash
+python examples/example_workflow.py
+```
+
+The real dataset (`real.csv`) has 500 records, 6 variables (`age`, `bmi`, `sbp`, `sex`, `diagnosis`, `smoker`), and realistic missingness in `bmi` (~12 %), `sbp` (~8 %), `smoker` (~20 %).
+
+| Dataset | Fidelity | Missingness |
+|---------|----------|-------------|
+| `synth_ideal` | ≈ 1.0 | ≈ 1.0 | Exact copy — upper-bound baseline |
+| `synth_fid1` | High | High | Slight distribution shifts |
+| `synth_miss1` | High | Lower | Missingness in wrong columns |
+| `synth_fid1_miss1` | Moderate | Lower | Shifts + missingness mismatch |
+| `synth_fid2` | Lower | High | Larger distribution shifts |
+| `synth_miss2` | High | Lower | 30 % missingness in key columns |
+| `synth_fid2_miss2` | Lower | Lower | Large shifts + missingness mismatch |
+
+The script writes a ready-to-use config to `examples/example_config.yaml`. Launch the dashboard directly with:
+
+```bash
+streamlit run run_dashboard.py -- --config examples/example_config.yaml
+```
+
+---
+
+## Interactive dashboard
+
+The dashboard has four tabs:
+
+| Tab | Contents |
+|-----|----------|
+| **Individual Report** | Per-dataset deep-dive: univariate CDFs / bar charts, bivariate heatmaps (real / synth / diff), multivariate results with per-variable plots, missingness rate bars + pattern heatmaps + dependency heatmaps |
+| **Benchmarking Report** | Cross-dataset comparison: radar chart, score table, rankings by axis with configurable weight sliders |
+| **Score Summary** | Three tables — individual metric scores, metric group scores, axis / composite scores |
+| **Metric Correlations** | Pearson agreement heatmap between metrics across runs; per-variable score correlation |
+
+**Precomputed results** can be uploaded in the sidebar to skip recomputation of expensive metrics. The dashboard injects them directly and only computes what is missing.
 
 ---
 
@@ -303,77 +258,67 @@ stdg-eval evaluate --real data/real.csv --synth data/synth1.csv data/synth2.csv 
 
 ```
 stdg-eval/
-├── run_dashboard.py           # Streamlit launcher
-├── pyproject.toml
-├── requirements.txt
-├── configs/
-│   └── example_config.yaml
+├── run_dashboard.py
+├── configs/example_config.yaml
 ├── examples/
+│   ├── example_config.yaml
 │   └── example_workflow.py
 └── stdg_eval/
-    ├── __init__.py            # Public API re-exports
-    ├── cli.py                 # stdg-eval CLI
-    ├── config.py              # Defaults and EvalConfig dataclass
-    ├── utils/
-    │   └── data_utils.py      # Data loading, column type inference
+    ├── cli.py                        # CLI entry point
+    ├── config.py                     # EvalConfig, FidelityConfig, MissingnessConfig
     ├── metrics/
-    │   ├── base.py            # BaseMetric ABC + MetricResult dataclass
+    │   ├── base.py                   # BaseMetric, MetricResult
     │   ├── fidelity/
-    │   │   ├── univariate.py  # WassersteinDistance, TotalVariationDistance
-    │   │   ├── bivariate.py   # SpearmanCorrelation, ContingencyMatrix
-    │   │   └── multivariate.py # CrossClassification, PropensityMSE
+    │   │   ├── univariate.py         # WassersteinDistance, TVD, HellingerDistance
+    │   │   ├── bivariate.py          # SpearmanCorrelation, ContingencyMatrix, PCD
+    │   │   └── multivariate.py       # AucRoc, PropensityMSE, CrossClassification (CrCl-RS/SR)
     │   └── missingness/
-    │       └── measures.py    # MissingnessRate, MissingnessSetDistribution,
-    │                          #   MissingnessClassifierAUROC, MissingnessDependencyStructure
+    │       └── measures.py           # MissingnessRate, SetDistribution, MissingAUROC, DependencyStructure
     ├── evaluation/
-    │   ├── fidelity.py        # evaluate_fidelity()
-    │   ├── missingness.py     # evaluate_missingness()
-    │   └── scoring.py         # compute_fidelity_score(), compute_missingness_score(),
-    │                          #   compute_composite_score()
+    │   ├── fidelity.py               # evaluate_fidelity()
+    │   ├── missingness.py            # evaluate_missingness()
+    │   └── scoring.py                # compute_*_score()
+    ├── utils/
+    │   ├── data_utils.py             # Loading, column type inference, config parsing
+    │   └── precomputed_io.py         # save_precomputed(), load_precomputed()
     └── visualization/
-        ├── plots.py           # Plotly figure factory
-        └── dashboard.py       # Streamlit dashboard
+        ├── metric_registry.py        # FIDELITY_GROUPS, MISSINGNESS_METRICS
+        ├── plots.py                  # Plotly figure factory
+        └── dashboard.py              # Streamlit app
 ```
 
 ---
 
-## Adding new metrics
+## Adding a new metric
 
-1. Create a new class in the appropriate module (e.g., `stdg_eval/metrics/fidelity/univariate.py`) that subclasses `BaseMetric` and implements `evaluate()`.
-2. `evaluate()` must return a `MetricResult` with a normalised `score` in [0, 1].
-3. Register the metric in the relevant evaluation function (`evaluation/fidelity.py` or `evaluation/missingness.py`).
-4. Add its weight slot to `compute_fidelity_score()` or `compute_missingness_score()` in `evaluation/scoring.py`.
-5. Add a corresponding plot function in `visualization/plots.py` and wire it into the dashboard.
+1. Subclass `BaseMetric` and implement `evaluate()` returning a `MetricResult` with `score` in [0, 1].
+2. Register it in `evaluation/fidelity.py` or `evaluation/missingness.py`.
+3. Add it to `FIDELITY_GROUPS` or `MISSINGNESS_METRICS` in `visualization/metric_registry.py` — the sidebar checkbox, weight slider, score tables, and precompute pipeline pick it up automatically.
+4. Add a plot function in `visualization/plots.py` and wire it into the relevant expander in `dashboard.py`.
 
 ```python
-# Example: adding a new univariate metric
 from stdg_eval.metrics.base import BaseMetric, MetricResult
 from stdg_eval.utils.data_utils import ColumnTypes
 import pandas as pd
 
-class MyNewMetric(BaseMetric):
-    name = "My New Metric"
+class MyMetric(BaseMetric):
+    name = "My Metric"
     description = "One-sentence description."
     axis = "fidelity"
 
     def evaluate(self, real: pd.DataFrame, synthetic: pd.DataFrame,
                  col_types: ColumnTypes) -> MetricResult:
-        # ... compute raw_score in [0, 1] ...
-        return MetricResult(
-            metric_name=self.name,
-            score=raw_score,
-            details={"raw_values": ...},
-        )
+        score = ...  # float in [0, 1]
+        return MetricResult(metric_name=self.name, score=score, details={...})
 ```
 
 ---
 
 ## TODO
 
-- [ ] **Unit tests** — `pytest` test suite covering all metrics and scoring functions (need to double-check the implementation of all metrics).
-- [ ] **Pairwise Correlation Difference** — unified mixed-type correlation measure (Cramér's V for categorical, point-biserial for mixed, Spearman for numerical).
-- [ ] **Utility metrics** — downstream task performance (e.g., train-on-synthetic/test-on-real AUROC for a specified target variable).
-- [ ] **Privacy metrics** — membership inference attack success rate, nearest-neighbour distance ratios, attribute disclosure risk.
-- [ ] **Composite score design** — finalise the weighting scheme for the 4-axis composite score once utility and privacy are implemented.
-- [ ] **Per-dataset PDF report export** — generate a self-contained HTML/PDF report for a single synthetic dataset.
-- [ ] **Confidence intervals** — bootstrap CIs for metric scores.
+- [ ] Unit test suite (`pytest`) covering all metrics and scoring functions
+- [ ] Utility metrics (train-on-synthetic / test-on-real task performance)
+- [ ] Privacy metrics (membership inference, nearest-neighbour distance ratios)
+- [ ] Composite score weighting scheme once utility and privacy axes are implemented
+- [ ] Per-dataset PDF / HTML report export
+- [ ] Bootstrap confidence intervals for metric scores
