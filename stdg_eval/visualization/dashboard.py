@@ -1333,11 +1333,12 @@ def _tab_metric_correlation():
     st.warning("TO-DO: Quality check the logic")
     st.caption(
         "How much do the different metrics agree with each other? "
-        "**Across variables**: do metrics identify the same variables as well/poorly reproduced? "
-        "**Across runs**: do metrics agree on which synthetic dataset is best?"
+        "**Across runs**: do metrics agree on which synthetic dataset is best? "
+        "**Across variables**: do metrics identify the same variables as well/poorly reproduced?"
     )
 
     fid_all = st.session_state["fidelity_results"]
+    miss_all = st.session_state.get("missingness_results", {})
     synths = st.session_state["synth_dfs"]
 
     if not synths or not fid_all:
@@ -1346,14 +1347,77 @@ def _tab_metric_correlation():
 
     run_names = list(synths.keys())
     col_types = st.session_state["col_types"] or {}
-    num_cols = [c for c, t in col_types.items() if t == "numerical"]
-    cat_cols = [c for c, t in col_types.items() if t == "categorical"]
-
 
     # ------------------------------------------------------------------
-    # Section 1: Across-variable correlation (per run)
+    # Section 1: Across-run correlation (all runs)
     # ------------------------------------------------------------------
-    st.subheader("1 · Across-variable metric agreement")
+    st.subheader("1 · Across-run metric agreement")
+    st.caption(
+        "Each cell shows the Pearson correlation of two metrics' overall scores across runs. "
+        "High correlation means both metrics agree on which synthetic dataset is best. "
+        "Hellinger is split into numerical and categorical subsets so it is directly "
+        "comparable to Wasserstein (numerical only) and TVD (categorical only)."
+    )
+
+    if len(run_names) < 2:
+        st.info("Need at least 2 runs to compute across-run correlations.")
+    else:
+        fid_scores: dict[str, dict[str, float]] = {name: {} for name in run_names}
+        miss_scores: dict[str, dict[str, float]] = {name: {} for name in run_names}
+
+        for name in run_names:
+            fres = fid_all.get(name, {})
+            mres = miss_all.get(name, {})
+
+            # Fidelity — driven by registry
+            for group in FIDELITY_GROUPS:
+                grp_results = fres.get(group["key"], {})
+                for m in group["metrics"]:
+                    res = grp_results.get(m["key"])
+                    if res is None:
+                        continue
+                    if m["key"] == "hellinger" and res.column_scores:
+                        num_scores = [v for c, v in res.column_scores.items() if col_types.get(c) == "numerical"]
+                        cat_scores = [v for c, v in res.column_scores.items() if col_types.get(c) == "categorical"]
+                        if num_scores:
+                            fid_scores[name][f"{m['short_label']} (num)"] = float(np.mean(num_scores))
+                        if cat_scores:
+                            fid_scores[name][f"{m['short_label']} (cat)"] = float(np.mean(cat_scores))
+                    else:
+                        fid_scores[name][m["short_label"]] = res.score
+
+            # Missingness — driven by registry
+            for m in MISSINGNESS_METRICS:
+                res = mres.get(m["key"])
+                if res is not None:
+                    miss_scores[name][m["label"]] = res.score
+
+        fid_df = pd.DataFrame(fid_scores).T.dropna(axis=1, how="all")
+        miss_df = pd.DataFrame(miss_scores).T.dropna(axis=1, how="all")
+
+        corr_cols = st.columns(2)
+        with corr_cols[0]:
+            if fid_df.shape[1] < 2:
+                st.info("Need at least 2 fidelity metrics across runs.")
+            else:
+                fid_corr = fid_df.corr(method="pearson")
+                st.plotly_chart(P.plot_metric_correlation_heatmap(fid_corr, "Fidelity metric agreement across runs"), use_container_width=True)
+                with st.expander("Fidelity scores per run"):
+                    st.dataframe(fid_df.style.format("{:.4f}", na_rep="—"), use_container_width=True)
+
+        with corr_cols[1]:
+            if miss_df.shape[1] < 2:
+                st.info("Need at least 2 missingness metrics across runs.")
+            else:
+                miss_corr = miss_df.corr(method="pearson")
+                st.plotly_chart(P.plot_metric_correlation_heatmap(miss_corr, "Missingness metric agreement across runs"), use_container_width=True)
+                with st.expander("Missingness scores per run"):
+                    st.dataframe(miss_df.style.format("{:.4f}", na_rep="—"), use_container_width=True)
+
+    # ------------------------------------------------------------------
+    # Section 2: Across-variable correlation (per run)
+    # ------------------------------------------------------------------
+    st.subheader("2 · Across-variable metric agreement")
     st.caption(
         "Each cell shows the Pearson correlation of two metrics' per-variable (or per-pair) "
         "scores. High correlation means both metrics agree on which variables are "
@@ -1365,7 +1429,6 @@ def _tab_metric_correlation():
     uni = fid_res.get("univariate", {})
     bi = fid_res.get("bivariate", {})
 
-    # Build score vectors keyed by variable/pair
     metric_vectors: dict[str, dict[str, float]] = {}
 
     # Univariate metrics — per column scores
@@ -1399,16 +1462,12 @@ def _tab_metric_correlation():
     if len(metric_vectors) < 2:
         st.info("Need at least 2 metrics with per-variable scores to compute correlations.")
     else:
-        # Build a DataFrame: index = union of all variables/pairs, columns = metrics
         all_keys = sorted(set(k for v in metric_vectors.values() for k in v))
         score_df = pd.DataFrame(
             {label: [vec.get(k, float("nan")) for k in all_keys] for label, vec in metric_vectors.items()},
             index=all_keys,
         )
-
-        # Pearson correlation between metric columns (pairwise, ignoring NaN)
         corr_df = score_df.corr(method="pearson")
-
         st.plotly_chart(P.plot_metric_correlation_heatmap(corr_df, f"Metric agreement across variables — {run_sel}"), use_container_width=True)
 
         with st.expander("Raw scores per variable / pair"):
@@ -1416,80 +1475,6 @@ def _tab_metric_correlation():
                 score_df.style.format("{:.4f}", na_rep="—"),
                 use_container_width=True,
             )
-
-    # ------------------------------------------------------------------
-    # Section 2: Across-run correlation (all runs)
-    # ------------------------------------------------------------------
-    st.subheader("2 · Across-run metric agreement")
-    st.caption(
-        "Each cell shows the Pearson correlation of two metrics' overall scores across runs. "
-        "High correlation means both metrics agree on which synthetic dataset is best. "
-        "Hellinger is split into numerical and categorical subsets so it is directly "
-        "comparable to Wasserstein (numerical only) and TVD (categorical only)."
-    )
-
-    if len(run_names) < 2:
-        st.info("Need at least 2 runs to compute across-run correlations.")
-        return
-
-    # Build a DataFrame: index = run names, columns = metrics (overall scores)
-    # Hellinger is split into numerical and categorical subsets so that it is
-    # directly comparable to WD (numerical only) and TVD (categorical only).
-    run_metric_scores: dict[str, dict[str, float]] = {name: {} for name in run_names}
-
-    for name in run_names:
-        fres = fid_all.get(name, {})
-        uni = fres.get("univariate", {})
-
-        # WD — numerical columns only
-        wd_res = uni.get("wasserstein")
-        if wd_res is not None:
-            run_metric_scores[name]["Wasserstein (num)"] = wd_res.score
-
-        # TVD — categorical columns only
-        tvd_res = uni.get("tvd")
-        if tvd_res is not None:
-            run_metric_scores[name]["TVD (cat)"] = tvd_res.score
-
-        # Hellinger split by column type so comparisons are like-for-like
-        hd_res = uni.get("hellinger")
-        if hd_res and hd_res.column_scores:
-            num_scores = [v for c, v in hd_res.column_scores.items() if col_types.get(c) == "numerical"]
-            cat_scores = [v for c, v in hd_res.column_scores.items() if col_types.get(c) == "categorical"]
-            if num_scores:
-                run_metric_scores[name]["Hellinger (num)"] = float(np.mean(num_scores))
-            if cat_scores:
-                run_metric_scores[name]["Hellinger (cat)"] = float(np.mean(cat_scores))
-
-        # Bivariate and multivariate — already type-specific by design
-        for group, mkey, label in [
-            ("bivariate", "spearman", "Spearman"),
-            ("bivariate", "contingency", "Contingency"),
-            ("bivariate", "pcd", "PCD"),
-            ("multivariate", "auc_roc", "AUC-ROC"),
-            ("multivariate", "propensity_mse", "Propensity MSE"),
-            ("multivariate", "crcl_rs", "CrCl-RS"),
-            ("multivariate", "crcl_sr", "CrCl-SR"),
-        ]:
-            res = fres.get(group, {}).get(mkey)
-            if res is not None:
-                run_metric_scores[name][label] = res.score
-
-    run_df = pd.DataFrame(run_metric_scores).T  # rows = runs, cols = metrics
-    run_df = run_df.dropna(axis=1, how="all")
-
-    if run_df.shape[1] < 2:
-        st.info("Need at least 2 metrics with overall scores to compute across-run correlations.")
-        return
-
-    run_corr = run_df.corr(method="pearson")
-    st.plotly_chart(P.plot_metric_correlation_heatmap(run_corr, "Metric agreement across runs"), use_container_width=True)
-
-    with st.expander("Overall scores per run"):
-        st.dataframe(
-            run_df.style.format("{:.4f}", na_rep="—"),
-            use_container_width=True,
-        )
 
 
 # ===========================================================================
