@@ -175,39 +175,41 @@ Reference the output in your config with `precomputed_results: precomputed.json`
 
 | Metric | Applies to | Score |
 |--------|-----------|-------|
-| Wasserstein Distance | Numerical | `exp(−WD / IQR_real)` per column, mean across columns |
+| Wasserstein Distance | Numerical | `exp(−WD / (IQR_real + ε))` per column, mean across columns |
 | Total Variation Distance | Categorical | `1 − TVD` per column, mean across columns |
-| Hellinger Distance | All | `1 − HD` per column, mean across columns |
+| Hellinger Distance | Numerical + Categorical | `1 − HD` per column, mean across columns |
+
+Hellinger Distance uses Scott's-rule histograms on the combined real + synthetic range for numerical columns, and frequency distributions for categorical columns.
 
 ### Fidelity — bivariate
 
 | Metric | Applies to | Score |
 |--------|-----------|-------|
-| Spearman Correlation | Num × Num | `1 − mean(|ρ_real − ρ_synth|)` across pairs |
+| Spearman Correlation | Num × Num | `1 − mean(abs(ρ_real − ρ_synth))` across pairs |
 | Contingency Matrix TVD | Cat × Cat, Num × Cat | `1 − mean(TVD)` across pairs |
-| Pairwise Correlation Difference (PCD) | All pairs (φk) | `1 − mean(|φk_real − φk_synth|)` across pairs |
+| Pairwise Correlation Difference (PCD) | All pairs (φk) | `1 − mean(abs(φk_real − φk_synth))` across pairs |
 
-PCD uses the φk (phi-k) correlation coefficient — a mixed-type association measure in [0, 1]. Binning uses Scott's rule on pooled real + synthetic values. A Student's t-test flags statistically significant differences (α = 0.05).
+PCD uses the φk (phi-k) correlation coefficient — a mixed-type association measure in [0, 1]. Binning uses Scott's rule on pooled real + synthetic values. A Student's t-test flags whether the mean absolute difference is statistically significant (α = 0.05).
 
 ### Fidelity — multivariate
 
 | Metric | Score |
 |--------|-------|
-| AUC-ROC | `1 − 2×|AUROC − 0.5|` — random forest discriminator; AUROC = 0.5 → score = 1 |
-| Propensity MSE | `1 − pMSE / pMSE_null` — propensity model vs shuffled-label null baseline |
-| CrCl-RS | `max(0, 1 − |mean_ratio − 1|)` — train on real, test on synth; ratio = perf_synth / perf_real_held |
+| AUC-ROC | `1 − 2 × abs(AUROC − 0.5)` — random forest discriminator trained via k-fold CV (default 5); AUROC = 0.5 → score = 1 |
+| Propensity MSE | `1 − 4 × pMSE` — propensity score MSE normalised by worst case (0.25 for balanced labels); pMSE = 0 → score = 1 |
+| CrCl-RS | `max(0, 1 − abs(mean_ratio − 1))` — train on real, test on synth; ratio = perf_synth / perf_real_held |
 | CrCl-SR | same formula — train on synth, test on real; ratio = perf_real / perf_synth_held |
 
-CrCl uses decision trees (accuracy for categorical targets, R² for numerical targets). A ratio of 1.0 per variable indicates perfect transfer. Reference: Goncalves et al. (2020) *BMC Med Res Methodol*.
+CrCl iterates over each variable as a prediction target using a decision tree (accuracy for categorical, R² for numerical). Complete case analysis is used by default (no imputation). A ratio of 1.0 per variable indicates perfect transfer. Reference: Goncalves et al. (2020) *BMC Med Res Methodol*.
 
 ### Missingness
 
 | Metric | Score |
 |--------|-------|
-| Missingness Rate | `1 − mean(|rate_real − rate_synth|)` across columns |
-| Pattern Distribution | `1 − TVD` between distributions over joint missingness patterns |
-| Missing AUROC | `1 − mean(|AUROC_real − AUROC_synth|)` — per-column missingness classifier |
-| Dependency Structure | `1 − mean(|corr_real − corr_synth|)` — Pearson correlations between binary missingness indicators |
+| Missingness Rate | `1 − mean(abs(rate_real − rate_synth))` across columns |
+| Pattern Distribution | `1 − TVD` between distributions over joint missingness patterns (which combinations of columns are missing together) |
+| Missing AUROC | `1 − mean(abs(AUROC_real − AUROC_synth))` — per-column logistic regression classifier predicting whether a cell is missing from all other columns; only columns with missingness rate in [1%, 99%] are included |
+| Dependency Structure | `1 − mean(abs(corr_real − corr_synth))` — Pearson correlations between binary missingness indicator vectors across all column pairs with some missingness |
 
 ---
 
@@ -241,10 +243,11 @@ streamlit run run_dashboard.py -- --config examples/example_config.yaml
 
 ## Interactive dashboard
 
-The dashboard has four tabs:
+The dashboard has five tabs:
 
 | Tab | Contents |
 |-----|----------|
+| **Dataset Description** | Overview of real and synthetic datasets: observation counts, column names and types, per-column missingness rates and unique value counts, flags for any column mismatches between real and synthetic |
 | **Individual Report** | Per-dataset deep-dive: univariate CDFs / bar charts, bivariate heatmaps (real / synth / diff), multivariate results with per-variable plots, missingness rate bars + pattern heatmaps + dependency heatmaps |
 | **Benchmarking Report** | Cross-dataset comparison: radar chart, score table, rankings by axis with configurable weight sliders |
 | **Score Summary** | Three tables — individual metric scores, metric group scores, axis / composite scores |
@@ -263,6 +266,19 @@ stdg-eval/
 ├── examples/
 │   ├── example_config.yaml
 │   └── example_workflow.py
+├── tests/
+│   ├── conftest.py
+│   ├── metrics/
+│   │   ├── fidelity/
+│   │   │   ├── test_univariate.py
+│   │   │   ├── test_bivariate.py
+│   │   │   └── test_multivariate.py
+│   │   └── missingness/
+│   │       └── test_measures.py
+│   ├── evaluation/
+│   │   └── test_scoring.py
+│   └── utils/
+│       └── test_data_utils.py
 └── stdg_eval/
     ├── cli.py                        # CLI entry point
     ├── config.py                     # EvalConfig, FidelityConfig, MissingnessConfig
@@ -316,7 +332,7 @@ class MyMetric(BaseMetric):
 
 ## TODO
 
-- [ ] Unit test suite (`pytest`) covering all metrics and scoring functions
+- [ ] Expand test coverage to include new metrics (CrCl-RS/SR, PCD, Hellinger, missingness metrics)
 - [ ] Utility metrics (train-on-synthetic / test-on-real task performance)
 - [ ] Privacy metrics (membership inference, nearest-neighbour distance ratios)
 - [ ] Composite score weighting scheme once utility and privacy axes are implemented
