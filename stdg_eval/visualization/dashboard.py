@@ -1493,6 +1493,71 @@ def _tab_metric_correlation():
 
 
 # ===========================================================================
+# Tab 0: Dataset description
+# ===========================================================================
+
+def _tab_dataset_description():
+    ss = st.session_state
+    real: pd.DataFrame = ss["real_df"]
+    synths: Dict[str, pd.DataFrame] = ss["synth_dfs"]
+    col_types: dict = ss["col_types"] or {}
+
+    st.header("Dataset description")
+
+    # --- Real dataset summary ---
+    st.subheader("Real dataset")
+    info_cols = st.columns(3)
+    info_cols[0].metric("Observations", f"{len(real):,}")
+    info_cols[1].metric("Columns", len(real.columns))
+    info_cols[2].metric("Missing cells", f"{real.isnull().sum().sum():,} ({100 * real.isnull().mean().mean():.1f}%)")
+
+    col_summary = pd.DataFrame({
+        "Column": real.columns,
+        "Type": [col_types.get(c, "unknown") for c in real.columns],
+        "Missing (%)": [f"{100 * real[c].isnull().mean():.1f}%" for c in real.columns],
+        "Unique values": [real[c].nunique() for c in real.columns],
+    })
+    st.dataframe(col_summary, use_container_width=True, hide_index=True)
+
+    # --- Synthetic datasets summary ---
+    st.subheader("Synthetic datasets")
+
+    # Overview table: one row per synthetic dataset
+    overview_rows = []
+    for name, synth in synths.items():
+        n_missing = synth.isnull().sum().sum()
+        pct_missing = 100 * synth.isnull().mean().mean()
+        extra_cols = [c for c in synth.columns if c not in real.columns]
+        missing_from_real = [c for c in real.columns if c not in synth.columns]
+        overview_rows.append({
+            "Dataset": name,
+            "Observations": f"{len(synth):,}",
+            "Columns": len(synth.columns),
+            "Missing cells": f"{n_missing:,} ({pct_missing:.1f}%)",
+            "Extra cols (not in real)": ", ".join(extra_cols) if extra_cols else "—",
+            "Missing cols (vs real)": ", ".join(missing_from_real) if missing_from_real else "—",
+        })
+    st.dataframe(pd.DataFrame(overview_rows), use_container_width=True, hide_index=True)
+
+    # --- Per-synthetic per-column detail ---
+    if synths:
+        selected = st.selectbox(
+            "Column-level detail for:", list(synths.keys()), key="desc_selected"
+        )
+        synth = synths[selected]
+        shared_cols = [c for c in real.columns if c in synth.columns]
+        detail = pd.DataFrame({
+            "Column": shared_cols,
+            "Type": [col_types.get(c, "unknown") for c in shared_cols],
+            "Real — missing (%)": [f"{100 * real[c].isnull().mean():.1f}%" for c in shared_cols],
+            f"{selected} — missing (%)": [f"{100 * synth[c].isnull().mean():.1f}%" for c in shared_cols],
+            "Real — unique": [real[c].nunique() for c in shared_cols],
+            f"{selected} — unique": [synth[c].nunique() for c in shared_cols],
+        })
+        st.dataframe(detail, use_container_width=True, hide_index=True)
+
+
+# ===========================================================================
 # Main app entry point
 # ===========================================================================
 
@@ -1520,7 +1585,9 @@ def run_dashboard():
 
     _weight_controls()
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Individual Report", "🏆 Benchmarking Report", "📋 Score Summary", "🔗 Metric Correlations"])
+    tab0, tab1, tab2, tab3, tab4 = st.tabs(["🗂 Dataset Description", "📊 Individual Report", "🏆 Benchmarking Report", "📋 Score Summary", "🔗 Metric Correlations"])
+    with tab0:
+        _tab_dataset_description()
     with tab1:
         _tab_individual()
     with tab2:
