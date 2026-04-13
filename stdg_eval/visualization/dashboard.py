@@ -37,6 +37,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import streamlit as st
+from scipy.stats import rankdata
 
 from stdg_eval.config import (
     DEFAULT_COMPOSITE_WEIGHTS,
@@ -1558,6 +1559,271 @@ def _tab_dataset_description():
 
 
 # ===========================================================================
+# Tab 5: Ranking report (Yan et al. 2022)
+# ===========================================================================
+
+def _tab_ranking():
+    """
+    Ranking mechanism following Yan et al. (2022) — datasets ranked per metric
+    (rank 1 = best score), ties receive the average of tied ranks.
+
+    Hierarchy mirrors the scoring system:
+      1. Per-metric ranks within each fidelity group → average → group rank
+      2. Group ranks weighted by fidelity group weights → fidelity axis rank
+      3. Per-metric ranks within missingness weighted by missingness metric weights
+         → missingness axis rank
+      4. Fidelity + missingness axis ranks weighted by composite weights
+         → final rank score  (lower = better)
+
+    Uses the same weight values as set in the weight controls.
+
+    Reference: Yan C, Yan Y, Wan Z, Zhang Z, Omberg L, Guinney J, et al.
+    A Multifaceted benchmarking of synthetic electronic health record generation
+    models. Nat Commun. 2022 Dec 9;13(1):7609.
+    doi:10.1038/s41467-022-35295-1. PMID: 36494374.
+    """
+    st.header("Ranking Report")
+    st.caption(
+        "Ranks synthetic datasets relative to each other following Yan et al. (*Nat Commun* 2022). "
+        "For each metric, datasets are ranked by score (rank 1 = best; ties → average rank). "
+        "Ranks are aggregated using the same hierarchical weights as the scoring system — "
+        "**lower final rank score = better**."
+    )
+
+    synths = st.session_state["synth_dfs"]
+    fid_all = st.session_state["fidelity_results"]
+    miss_all = st.session_state["missingness_results"]
+
+    if not synths or (not fid_all and not miss_all):
+        st.info("Run evaluation first (sidebar → **▶ Run evaluation**).")
+        return
+
+    run_names = list(synths.keys())
+    if len(run_names) < 2:
+        st.info("Ranking requires at least 2 synthetic datasets.")
+        return
+
+    n = len(run_names)
+    fidelity_weights, miss_weights, composite_weights = _get_weights()
+
+    # ------------------------------------------------------------------
+    # Helper: rank a score dict (higher score → rank 1)
+    # ------------------------------------------------------------------
+    def _ranks(scores_dict: Dict[str, float]) -> Dict[str, float]:
+        eligible = [name for name in run_names if name in scores_dict]
+        if len(eligible) < 2:
+            return {}
+        arr = np.array([scores_dict[name] for name in eligible])
+        ranks = rankdata(-arr, method="average")
+        return dict(zip(eligible, map(float, ranks)))
+
+    # ------------------------------------------------------------------
+    # Per-metric ranks + group-level average ranks (fidelity)
+    # ------------------------------------------------------------------
+    per_metric_ranks: Dict[str, Dict[str, float]] = {}   # display_label → {dataset: rank}
+    fid_group_ranks: Dict[str, Dict[str, float]] = {}    # group_key → {dataset: avg_rank}
+
+    for g, g_weight in zip(FIDELITY_GROUPS, fidelity_weights):
+        if g_weight == 0.0:
+            continue
+        metric_rank_list: List[Dict[str, float]] = []
+        for m in g["metrics"]:
+            key = m["key"]
+            scores = {
+                name: fid_all[name][g["key"]][key].score
+                for name in run_names
+                if name in fid_all
+                and g["key"] in fid_all[name]
+                and key in fid_all[name][g["key"]]
+            }
+            if not scores:
+                continue
+            ranks = _ranks(scores)
+            if ranks:
+                label = f"{m['label']} ({g['label']})"
+                per_metric_ranks[label] = ranks
+                metric_rank_list.append(ranks)
+
+        if metric_rank_list:
+            # Average per-metric ranks within the group
+            all_ds = set().union(*[r.keys() for r in metric_rank_list])
+            fid_group_ranks[g["key"]] = {
+                ds: float(np.mean([r[ds] for r in metric_rank_list if ds in r]))
+                for ds in all_ds
+            }
+
+    # ------------------------------------------------------------------
+    # Per-metric ranks (missingness)
+    # ------------------------------------------------------------------
+    miss_metric_ranks: List[Tuple[Dict[str, float], float]] = []  # (ranks, weight)
+
+    for m, m_weight in zip(MISSINGNESS_METRICS, miss_weights):
+        if m_weight == 0.0:
+            continue
+        key = m["key"]
+        scores = {
+            name: miss_all[name][key].score
+            for name in run_names
+            if name in miss_all and key in miss_all[name]
+        }
+        if not scores:
+            continue
+        ranks = _ranks(scores)
+        if ranks:
+            label = f"{m['label']} (Missingness)"
+            per_metric_ranks[label] = ranks
+            miss_metric_ranks.append((ranks, m_weight))
+
+    # ------------------------------------------------------------------
+    # Fidelity axis rank = weighted average of group ranks
+    # ------------------------------------------------------------------
+    fid_axis_ranks: Dict[str, float] = {}
+    if fid_group_ranks:
+        g_weight_map = {g["key"]: w for g, w in zip(FIDELITY_GROUPS, fidelity_weights)}
+        for name in run_names:
+            wsum, wtotal = 0.0, 0.0
+            for gk, group_ranks in fid_group_ranks.items():
+                w = g_weight_map.get(gk, 0.0)
+                if name in group_ranks and w > 0:
+                    wsum += w * group_ranks[name]
+                    wtotal += w
+            if wtotal > 0:
+                fid_axis_ranks[name] = wsum / wtotal
+
+    # ------------------------------------------------------------------
+    # Missingness axis rank = weighted average of metric ranks
+    # ------------------------------------------------------------------
+    miss_axis_ranks: Dict[str, float] = {}
+    if miss_metric_ranks:
+        for name in run_names:
+            wsum, wtotal = 0.0, 0.0
+            for ranks, w in miss_metric_ranks:
+                if name in ranks and w > 0:
+                    wsum += w * ranks[name]
+                    wtotal += w
+            if wtotal > 0:
+                miss_axis_ranks[name] = wsum / wtotal
+
+    # ------------------------------------------------------------------
+    # Final composite rank = weighted average of axis ranks
+    # ------------------------------------------------------------------
+    w_fid, w_miss = composite_weights[0], composite_weights[1]
+    final_scores: Dict[str, float] = {}
+    for name in run_names:
+        wsum, wtotal = 0.0, 0.0
+        if name in fid_axis_ranks and w_fid > 0:
+            wsum += w_fid * fid_axis_ranks[name]
+            wtotal += w_fid
+        if name in miss_axis_ranks and w_miss > 0:
+            wsum += w_miss * miss_axis_ranks[name]
+            wtotal += w_miss
+        if wtotal > 0:
+            final_scores[name] = wsum / wtotal
+
+    if not final_scores:
+        st.info("Not enough data to compute ranks.")
+        return
+
+    # Sort datasets by final rank score (ascending = best first)
+    sorted_names = [name for name, _ in sorted(final_scores.items(), key=lambda x: x[1])]
+
+    best = sorted_names[0]
+    st.success(f"Best overall dataset: **{best}**")
+    st.divider()
+
+    # ------------------------------------------------------------------
+    # Bar chart (rank 1 → 1.0, rank N → 0.0 so higher bar = better)
+    # ------------------------------------------------------------------
+    bar_scores = (
+        {name: (n - final_scores[name]) / (n - 1) for name in sorted_names}
+        if n > 1 else {name: 1.0 for name in sorted_names}
+    )
+    fig = P.plot_score_bar(bar_scores, title="Relative ranking (higher = better)")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ------------------------------------------------------------------
+    # Fidelity rank table — MultiIndex columns (group → metric)
+    # ------------------------------------------------------------------
+    if fid_group_ranks:
+        st.subheader("Fidelity ranks")
+        st.caption(
+            "Ranks per metric (1 = best). Column headers show normalised group weights. "
+            "**Fidelity rank** = weighted average of group ranks."
+        )
+
+        total_fid_w = sum(fidelity_weights)
+        col_tuples: List[Tuple[str, str]] = []
+        col_data: Dict[Tuple[str, str], Dict[str, float]] = {}
+
+        for g, g_weight in zip(FIDELITY_GROUPS, fidelity_weights):
+            if g_weight == 0.0:
+                continue
+            norm_w = g_weight / total_fid_w if total_fid_w > 0 else 0.0
+            g_header = f"{g['label']}  (w={norm_w:.2f})"
+            for m in g["metrics"]:
+                label_key = f"{m['label']} ({g['label']})"
+                if label_key not in per_metric_ranks:
+                    continue
+                ct = (g_header, m["label"])
+                col_tuples.append(ct)
+                col_data[ct] = {
+                    name: round(per_metric_ranks[label_key].get(name, float("nan")), 2)
+                    for name in sorted_names
+                }
+
+        ct_total = ("Total", "Fidelity rank")
+        col_tuples.append(ct_total)
+        col_data[ct_total] = {
+            name: round(fid_axis_ranks.get(name, float("nan")), 2)
+            for name in sorted_names
+        }
+
+        if col_tuples:
+            fid_df = pd.DataFrame(
+                {ct: col_data[ct] for ct in col_tuples},
+                index=sorted_names,
+            )
+            fid_df.columns = pd.MultiIndex.from_tuples(col_tuples)
+            fid_df.index.name = "Dataset"
+            st.dataframe(fid_df.style.format("{:.2f}", na_rep="—"), use_container_width=True)
+
+    # ------------------------------------------------------------------
+    # Missingness rank table — flat columns with normalised weights in header
+    # ------------------------------------------------------------------
+    if miss_axis_ranks:
+        st.subheader("Missingness ranks")
+        st.caption(
+            "Ranks per metric (1 = best). Column headers show normalised metric weights. "
+            "**Missingness rank** = weighted average of metric ranks."
+        )
+
+        total_miss_w = sum(w for _, w in miss_metric_ranks)
+        miss_col_data: Dict[str, Dict[str, float]] = {}
+
+        for m, m_weight in zip(MISSINGNESS_METRICS, miss_weights):
+            if m_weight == 0.0:
+                continue
+            label_key = f"{m['label']} (Missingness)"
+            if label_key not in per_metric_ranks:
+                continue
+            norm_w = m_weight / total_miss_w if total_miss_w > 0 else 0.0
+            col_name = f"{m['label']}  (w={norm_w:.2f})"
+            miss_col_data[col_name] = {
+                name: round(per_metric_ranks[label_key].get(name, float("nan")), 2)
+                for name in sorted_names
+            }
+
+        miss_col_data["Missingness rank"] = {
+            name: round(miss_axis_ranks.get(name, float("nan")), 2)
+            for name in sorted_names
+        }
+
+        miss_df = pd.DataFrame(miss_col_data, index=sorted_names)
+        miss_df.index.name = "Dataset"
+        st.dataframe(miss_df.style.format("{:.2f}", na_rep="—"), use_container_width=True)
+
+
+# ===========================================================================
 # Main app entry point
 # ===========================================================================
 
@@ -1585,7 +1851,7 @@ def run_dashboard():
 
     _weight_controls()
 
-    tab0, tab1, tab2, tab3, tab4 = st.tabs(["🗂 Dataset Description", "📊 Individual Report", "🏆 Benchmarking Report", "📋 Score Summary", "🔗 Metric Correlations"])
+    tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗂 Dataset Description", "📊 Individual Report", "🏆 Benchmarking Report", "📋 Score Summary", "🔗 Metric Correlations", "🥇 Ranking"])
     with tab0:
         _tab_dataset_description()
     with tab1:
@@ -1596,6 +1862,8 @@ def run_dashboard():
         _tab_score_summary()
     with tab4:
         _tab_metric_correlation()
+    with tab5:
+        _tab_ranking()
 
 
 if __name__ == "__main__":
