@@ -727,6 +727,7 @@ def _tab_individual():
         with st.expander("Missingness", expanded=True):
             rate_res = miss_res.get("rate")
             set_res = miss_res.get("set_distribution")
+            auroc_res = miss_res.get("missing_auroc")
             dep_res = miss_res.get("dependency_structure")
 
             if rate_res:
@@ -771,6 +772,15 @@ def _tab_individual():
                             P.plot_missingness_dependency_diff(real_dep, synth_dep, "Difference (real − synth)"),
                             use_container_width=True,
                         )
+
+            if auroc_res and "auroc_real" in auroc_res.details:
+                st.markdown("**Missingness AUROC per variable**")
+                fig = P.plot_missing_auroc(
+                    auroc_res.details["auroc_real"],
+                    auroc_res.details["auroc_synth"],
+                    synth_label=selected,
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
             if set_res:
                 st.caption(

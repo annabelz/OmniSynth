@@ -431,6 +431,55 @@ def plot_missingness_dependency_diff(
     return fig
 
 
+def plot_missing_auroc(
+    auroc_real: Dict[str, float],
+    auroc_synth: Dict[str, float],
+    synth_label: str = "Synthetic",
+    synth_color: str = SYNTH_COLORS[0],
+) -> go.Figure:
+    """
+    Grouped bar chart of per-column missingness AUROC for real vs synthetic.
+
+    Each bar shows how well a logistic classifier predicts whether that column
+    is missing (using all other columns as features). A reference line at
+    AUROC = 0.5 marks chance level (missingness is unpredictable). Columns are
+    sorted by real AUROC descending.
+    """
+    cols = sorted(auroc_real.keys(), key=lambda c: -auroc_real.get(c, 0))
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=cols,
+        y=[auroc_real.get(c, float("nan")) for c in cols],
+        name="Real",
+        marker_color=REAL_COLOR,
+    ))
+    fig.add_trace(go.Bar(
+        x=cols,
+        y=[auroc_synth.get(c, float("nan")) for c in cols],
+        name=synth_label,
+        marker_color=synth_color,
+    ))
+    fig.add_hline(
+        y=0.5,
+        line_dash="dash",
+        line_color="grey",
+        annotation_text="chance (0.5)",
+        annotation_position="top right",
+    )
+    fig.update_layout(
+        title="Missingness AUROC per variable",
+        xaxis_title="Column",
+        yaxis_title="AUROC",
+        yaxis=dict(range=[0, 1]),
+        barmode="group",
+        xaxis_tickangle=-45,
+        height=400,
+        margin=dict(l=40, r=20, t=50, b=100),
+    )
+    return fig
+
+
 # ===========================================================================
 # 4. Benchmarking / scoring summary
 # ===========================================================================
