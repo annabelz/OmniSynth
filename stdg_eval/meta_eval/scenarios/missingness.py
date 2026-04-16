@@ -274,7 +274,7 @@ def scenario_missingness_4(
 
 
 # ===========================================================================
-# Scenario 5 — MAR univariate self-conditioning
+# Scenario 5 — MNAR univariate self-conditioning
 # ===========================================================================
 
 def scenario_missingness_5(
