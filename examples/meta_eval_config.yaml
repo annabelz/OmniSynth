@@ -1,13 +1,27 @@
-input_data: examples/data/real.csv
-
-output_dir: examples/meta_eval/noisy/
-
-results_path: examples/meta_eval/results.json
-
+input_data: /home/annabelzhu/Repositories/stdg-eval/examples/data/real.csv
+output_dir: /home/annabelzhu/Repositories/stdg-eval/examples/meta_eval/noisy
+results_path: /home/annabelzhu/Repositories/stdg-eval/examples/meta_eval/results.json
 scenarios:
-  - name: fidelity_1
-    n_datasets: 10
-
+- name: fidelity_1
+  n_datasets: 100
+- name: fidelity_2
+  n_datasets: 100
+- name: fidelity_3
+  n_datasets: 100
+- name: fidelity_4
+  n_datasets: 100
+- name: fidelity_5
+  n_datasets: 100
+- name: missingness_1
+  n_datasets: 100
+- name: missingness_2
+  n_datasets: 100
+- name: missingness_3
+  n_datasets: 100
+- name: missingness_4
+  n_datasets: 100
+- name: missingness_5
+  n_datasets: 100
 column_types:
   age: numerical
   bmi: numerical
@@ -15,9 +29,7 @@ column_types:
   sex: categorical
   diagnosis: categorical
   smoker: categorical
-
 axes:
-  - fidelity
-  - missingness
-
+- fidelity
+- missingness
 random_seed: 42

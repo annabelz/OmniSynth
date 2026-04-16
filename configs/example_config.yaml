@@ -1,9 +1,9 @@
-# stdg-eval example configuration file
+# stdg-eval dashboard configuration
 # -----------------------------------------------------------
-# Pass this file to the dashboard:
-#   streamlit run run_dashboard.py -- --config configs/example_config.yaml
-# or:
+# Launch the dashboard with this config:
 #   stdg-eval dashboard --config configs/example_config.yaml
+# or:
+#   streamlit run run_dashboard.py -- --config configs/example_config.yaml
 
 # Path to the real (ground-truth) dataset CSV
 real_data: data/real.csv
@@ -17,34 +17,44 @@ synthetic_datasets:
   - name: synth3
     path: data/synth3.csv
 
-# Optional: path to precomputed fidelity results (JSON).
-# Generate with:  stdg-eval precompute --config this_config.yaml --output precomputed.json
-# When present, the dashboard loads these results directly and skips recomputing
-# all fidelity metrics (univariate, bivariate, multivariate).
-# precomputed_results: precomputed.json
-
-# Optional: override automatic column type inference
+# Optional: override automatic column type inference.
+# Supported types: numerical, categorical
 # column_types:
 #   age: numerical
-#   sex: categorical
 #   bmi: numerical
+#   sbp: numerical
+#   sex: categorical
 #   diagnosis: categorical
+#   smoker: categorical
 
 # Optional: enable or disable individual metrics (all default to true if omitted)
 # metrics:
-#   # Univariate
-#   wasserstein: true
-#   tvd: true
-#   hellinger: true
-#   # Bivariate
-#   spearman: true
-#   contingency: true
-#   pairwise_correlation_difference: true
-#   # Multivariate
-#   auc_roc: true
-#   propensity_mse: true
+#   # Univariate fidelity
+#   wasserstein: true          # Wasserstein distance (numerical columns)
+#   tvd: true                  # Total variation distance (categorical columns)
+#   hellinger: true            # Hellinger distance (all columns)
+#   # Bivariate fidelity
+#   spearman: true             # Spearman correlation (numerical pairs)
+#   contingency: true          # Contingency TVD (categorical / mixed pairs)
+#   pairwise_correlation_difference: true  # Phi-k correlation difference (all pairs)
+#   # Multivariate fidelity
+#   auc_roc: true              # Classifier AUC-ROC (distinguishability)
+#   propensity_mse: true       # Propensity score MSE
+#   crcl_rs: true              # Cross-classification real→synth
+#   crcl_sr: true              # Cross-classification synth→real
 #   # Missingness
-#   rate: true
-#   set_distribution: true
-#   missing_auroc: true
-#   dependency_structure: true
+#   rate: true                 # Per-variable missingness rates
+#   set_distribution: true     # Missingness pattern distribution TVD
+#   missing_auroc: true        # Classifier AUROC on missingness indicator
+#   dependency_structure: true # Missingness dependency (phi-correlation) structure
+
+# Optional: path to precomputed results (JSON).
+# Generate with:  stdg-eval precompute --config configs/example_config.yaml --output precomputed.json
+# When present, the dashboard loads these results directly and skips recomputing
+# expensive metrics (bivariate, multivariate).
+# precomputed_results: precomputed.json
+
+# Optional: path to meta-evaluation results (JSON).
+# Generate with:  stdg-eval meta-eval --config configs/example_meta_eval_config.yaml
+# When present, populates the Meta-evaluation tab in the dashboard.
+# meta_eval_results: meta_eval/results.json

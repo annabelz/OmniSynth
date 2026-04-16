@@ -165,7 +165,7 @@ Bivariate, multivariate, and missingness metrics can be slow on large datasets. 
 stdg-eval precompute --config configs/my_config.yaml --output precomputed.json
 ```
 
-Reference the output in your config with `precomputed_results: precomputed.json`, or upload it via the dashboard sidebar.
+Reference the output in your config with `precomputed_results: precomputed.json`.
 
 ---
 
@@ -253,7 +253,7 @@ The dashboard has five tabs:
 | **Score Summary** | Three tables — individual metric scores, metric group scores, axis / composite scores |
 | **Metric Correlations** | Pearson agreement heatmap between metrics across runs; per-variable score correlation |
 
-**Precomputed results** can be uploaded in the sidebar to skip recomputation of expensive metrics. The dashboard injects them directly and only computes what is missing.
+**Precomputed results** are loaded automatically via the `precomputed_results` key in the config file. The dashboard injects them directly and only computes what is missing.
 
 ---
 

@@ -110,6 +110,7 @@ def _init_state():
         # Precomputed bivariate/multivariate results loaded from JSON
         # {synth_name: {group: {metric_key: MetricResult}}}
         "precomputed_results": {},
+        "meta_eval_results": None,   # loaded from meta_eval_results path in config
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -174,6 +175,14 @@ def _sidebar():
                         )
                     except Exception as exc:
                         st.sidebar.warning(f"Could not load precomputed results: {exc}")
+                # Meta-evaluation results
+                if "meta_eval_results" in cfg:
+                    try:
+                        import json as _json
+                        with open(cfg["meta_eval_results"]) as _f:
+                            st.session_state["meta_eval_results"] = _json.load(_f)
+                    except Exception as exc:
+                        st.sidebar.warning(f"Could not load meta-eval results: {exc}")
                 # Metric enable flags from config — only applied when a new config
                 # file is loaded (detected via content hash). After initial load the
                 # sidebar checkboxes are the source of truth and are not overwritten,
@@ -197,6 +206,23 @@ def _sidebar():
                     st.session_state["run_miss_auroc"] = mc.run_missing_auroc
                     st.session_state["run_miss_dep"] = mc.run_dependency_structure
                 st.session_state["_config_hash"] = cfg_hash
+
+                # --- Load summary note ---
+                note_lines = [f"**Real dataset:** `{cfg['real_data']}`"]
+                synth_entries = cfg.get("synthetic_datasets", [])
+                if synth_entries:
+                    note_lines.append(f"**Synthetic datasets** ({len(synth_entries)}):")
+                    for entry in synth_entries:
+                        note_lines.append(f"- `{entry['name']}`: `{entry['path']}`")
+                precomputed_loaded = bool(st.session_state.get("precomputed_results"))
+                note_lines.append(
+                    f"**Precomputed results:** {'loaded' if precomputed_loaded else 'not found'}"
+                )
+                meta_loaded = bool(st.session_state.get("meta_eval_results"))
+                note_lines.append(
+                    f"**Meta-eval results:** {'loaded' if meta_loaded else 'not found'}"
+                )
+                st.sidebar.info("\n\n".join(note_lines))
             except Exception as e:
                 st.sidebar.error(f"Failed to load config: {e}")
 
@@ -238,33 +264,10 @@ def _sidebar():
     st.sidebar.divider()
     st.sidebar.subheader("3 · Evaluate")
 
-    # Precomputed results upload (alternative / supplement to config reference)
-    with st.sidebar.expander("Precomputed results (optional)", expanded=False):
-        st.caption(
-            "Upload a JSON file produced by `stdg-eval precompute` to skip "
-            "recomputing expensive bivariate / multivariate metrics."
-        )
-        pre_file = st.file_uploader(
-            "Precomputed results (.json)", type=["json"], key="precomputed_upload"
-        )
-        if pre_file:
-            try:
-                import tempfile
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
-                    tmp.write(pre_file.read())
-                    tmp_path = tmp.name
-                st.session_state["precomputed_results"] = load_precomputed(tmp_path)
-                os.unlink(tmp_path)
-                n_synths = len(st.session_state["precomputed_results"])
-                st.success(f"Loaded precomputed results for {n_synths} dataset(s).")
-            except Exception as exc:
-                st.error(f"Failed to load precomputed results: {exc}")
-        elif st.session_state.get("precomputed_results"):
-            n_synths = len(st.session_state["precomputed_results"])
-            st.info(f"Using precomputed results for {n_synths} dataset(s) (loaded from config).")
-            if st.button("Clear precomputed results"):
-                st.session_state["precomputed_results"] = {}
-                st.rerun()
+    # Precomputed results status (loaded from config via precomputed_results key)
+    if st.session_state.get("precomputed_results"):
+        n_synths = len(st.session_state["precomputed_results"])
+        st.sidebar.caption(f"Precomputed results loaded for {n_synths} dataset(s).")
 
     with st.sidebar.expander("Metric options", expanded=False):
         for group in FIDELITY_GROUPS:
@@ -748,6 +751,23 @@ def _tab_individual():
             with miss_pattern_cols[1]:
                 st.markdown(f"**{selected} — missingness pattern**")
                 fig = P.plot_missingness_pattern_heatmap(synth[shared_cols], title=f"{selected}: missingness pattern")
+                st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("**Missingness pattern frequency (UpSet)**")
+            upset_cols = st.columns(2)
+            with upset_cols[0]:
+                fig = P.plot_missingness_upset(
+                    real[shared_cols],
+                    title="Real",
+                    bar_color=P.REAL_COLOR,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            with upset_cols[1]:
+                fig = P.plot_missingness_upset(
+                    synth[shared_cols],
+                    title=selected,
+                    bar_color=P.SYNTH_COLORS[0],
+                )
                 st.plotly_chart(fig, use_container_width=True)
 
             if dep_res and "columns" in dep_res.details:
@@ -1834,6 +1854,142 @@ def _tab_ranking():
 
 
 # ===========================================================================
+# Tab 6: Meta-evaluation report
+# ===========================================================================
+
+def _tab_meta_eval():
+    st.header("Meta-evaluation Report")
+    st.caption(
+        "Results from running the benchmark on programmatically generated noisy datasets. "
+        "Each scenario is evaluated across multiple replicates; points show individual "
+        "replicate scores, diamonds show mean ± std."
+    )
+
+    meta = st.session_state.get("meta_eval_results")
+    if not meta:
+        st.info(
+            "No meta-evaluation results loaded. "
+            "Add ``meta_eval_results: path/to/results.json`` to your config file, "
+            "or run ``stdg-eval meta-eval --config <config>`` first."
+        )
+        return
+
+    # Score keys present across all scenarios
+    all_per_ds_keys: set = set()
+    for data in meta.values():
+        for row in data.get("per_dataset", []):
+            all_per_ds_keys.update(k for k, v in row.items() if isinstance(v, float))
+
+    score_label_map = {
+        "fidelity_overall":            "Fidelity (overall)",
+        "fidelity_univariate":         "Fidelity — Univariate",
+        "fidelity_bivariate":          "Fidelity — Bivariate",
+        "fidelity_multivariate":       "Fidelity — Multivariate",
+        "missingness_overall":         "Missingness (overall)",
+        "missingness_rate":            "Missingness — Rate",
+        "missingness_set_distribution":"Missingness — Pattern",
+        "missingness_missing_auroc":   "Missingness — AUROC",
+        "missingness_dependency_structure": "Missingness — Dependency",
+        "composite_score":             "Composite",
+    }
+    available_keys = [k for k in score_label_map if k in all_per_ds_keys]
+
+    if not available_keys:
+        st.warning("No numeric score columns found in meta-eval results.")
+        return
+
+    # ------------------------------------------------------------------
+    # Summary plot — fidelity, missingness, composite on one plot
+    # ------------------------------------------------------------------
+    st.subheader("Summary across scenarios")
+    axis_filter = st.selectbox(
+        "Show scenarios for axis",
+        ["All", "Fidelity", "Missingness"],
+        key="meta_summary_axis",
+    )
+    all_scenarios = list(meta.keys())
+    if axis_filter == "Fidelity":
+        filtered_scenarios = [s for s in all_scenarios if s.startswith("fidelity")]
+    elif axis_filter == "Missingness":
+        filtered_scenarios = [s for s in all_scenarios if s.startswith("missingness")]
+    else:
+        filtered_scenarios = all_scenarios
+    filtered_meta = {s: meta[s] for s in filtered_scenarios}
+    summary_keys = [k for k in ("fidelity_overall", "missingness_overall", "composite_score") if k in all_per_ds_keys]
+    if summary_keys and filtered_meta:
+        fig = P.plot_meta_eval_summary(filtered_meta, summary_keys, score_label_map)
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ------------------------------------------------------------------
+    # Per-scenario plots
+    # ------------------------------------------------------------------
+    st.subheader("Per-scenario breakdown")
+
+    # Fixed top-level keys shown in every plot
+    plot_keys = [k for k in ("fidelity_overall", "missingness_overall", "composite_score") if k in all_per_ds_keys]
+
+    # Sub-metric keys shown as tables beneath each plot
+    _fidelity_sub_keys = [
+        "fidelity_univariate", "fidelity_bivariate", "fidelity_multivariate",
+    ]
+    _missingness_sub_keys = [
+        "missingness_rate", "missingness_set_distribution",
+        "missingness_missing_auroc", "missingness_dependency_structure",
+    ]
+    fidelity_sub_keys    = [k for k in _fidelity_sub_keys    if k in all_per_ds_keys]
+    missingness_sub_keys = [k for k in _missingness_sub_keys if k in all_per_ds_keys]
+    sub_keys = fidelity_sub_keys + missingness_sub_keys
+
+    # Preserve config-file ordering (insertion order of meta dict)
+    fidelity_scenarios    = [s for s in meta if s.startswith("fidelity")]
+    missingness_scenarios = [s for s in meta if s.startswith("missingness")]
+    other_scenarios       = [s for s in meta if s not in fidelity_scenarios + missingness_scenarios]
+
+    for group_label, group in [
+        ("Fidelity scenarios",    fidelity_scenarios),
+        ("Missingness scenarios",  missingness_scenarios),
+        ("Other scenarios",        other_scenarios),
+    ]:
+        if not group:
+            continue
+        st.markdown(f"**{group_label}**")
+        cols = st.columns(min(len(group), 3))
+        for i, scenario in enumerate(group):
+            per_ds = meta[scenario].get("per_dataset", [])
+            n = meta[scenario].get("n_datasets", len(per_ds))
+            with cols[i % 3]:
+                fig = P.plot_meta_eval_scenario(
+                    scenario_name=f"{scenario}  (n={n})",
+                    per_dataset=per_ds,
+                    score_keys=plot_keys,
+                    score_labels=score_label_map,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                # Sub-metric score table
+                present_sub = [k for k in sub_keys if any(k in row for row in per_ds)]
+                if present_sub:
+                    table_rows = []
+                    for k in present_sub:
+                        vals = [row[k] for row in per_ds if k in row]
+                        if not vals:
+                            continue
+                        arr = np.array(vals)
+                        table_rows.append({
+                            "Metric": score_label_map.get(k, k),
+                            "Mean": f"{float(np.mean(arr)):.4f}",
+                            "Std": f"{float(np.std(arr)):.4f}",
+                        })
+                    if table_rows:
+                        st.dataframe(
+                            pd.DataFrame(table_rows),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+
+# ===========================================================================
 # Main app entry point
 # ===========================================================================
 
@@ -1861,7 +2017,7 @@ def run_dashboard():
 
     _weight_controls()
 
-    tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗂 Dataset Description", "📊 Individual Report", "🏆 Benchmarking Report", "📋 Score Summary", "🔗 Metric Correlations", "🥇 Ranking"])
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🗂 Dataset Description", "📊 Individual Report", "🏆 Benchmarking Report", "📋 Score Summary", "🔗 Metric Correlations", "🥇 Ranking", "🧪 Meta-evaluation"])
     with tab0:
         _tab_dataset_description()
     with tab1:
@@ -1874,6 +2030,8 @@ def run_dashboard():
         _tab_metric_correlation()
     with tab5:
         _tab_ranking()
+    with tab6:
+        _tab_meta_eval()
 
 
 if __name__ == "__main__":

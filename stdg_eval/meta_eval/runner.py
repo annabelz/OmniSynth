@@ -135,12 +135,12 @@ def run_meta_eval(config: MetaEvalConfig, verbose: bool = True) -> Dict:
                 comp = compute_composite_score(f_scores, m_scores) if (f_scores or m_scores) else {}
 
             for k, v in f_scores.items():
-                if v is not None:
+                if isinstance(v, float):
                     fid_score_lists.setdefault(k, []).append(v)
                     row[f"fidelity_{k}"] = v
 
             for k, v in m_scores.items():
-                if v is not None:
+                if isinstance(v, float):
                     miss_score_lists.setdefault(k, []).append(v)
                     row[f"missingness_{k}"] = v
 

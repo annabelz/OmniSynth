@@ -481,6 +481,169 @@ def plot_missing_auroc(
 
 
 # ===========================================================================
+# 3b. UpSet plot — missingness pattern frequencies
+# ===========================================================================
+
+def plot_missingness_upset(
+    df: pd.DataFrame,
+    title: str = "Missingness patterns",
+    top_n: int = 15,
+    bar_color: str = REAL_COLOR,
+) -> go.Figure:
+    """
+    UpSet-style plot for missingness patterns.
+
+    Shows the *top_n* most common missingness patterns sorted by frequency
+    (most common on the left).  Complete-case rows (no missing values) are
+    excluded so the chart focuses on the patterns that matter.
+
+    Layout
+    ------
+    Row 1 (top)   — vertical bar chart: proportion of rows with each pattern.
+    Row 2 (bottom) — dot matrix: filled circle = variable is missing in that
+                     pattern; empty circle = observed.  Vertical lines connect
+                     the filled dots within each pattern column.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The dataset to analyse (real or synthetic).
+    title : str
+        Plot title.
+    top_n : int
+        Maximum number of patterns to display.
+    bar_color : str
+        Fill colour for the bars and filled dots.
+    """
+    ind = df.isnull().astype(int)
+    cols = list(ind.columns)
+    n_cols = len(cols)
+
+    # Count patterns, drop all-observed rows, keep top_n
+    pattern_counts = ind.apply(tuple, axis=1).value_counts()
+    all_observed = tuple([0] * n_cols)
+    pattern_counts = pattern_counts.drop(all_observed, errors="ignore")
+    pattern_counts = pattern_counts.head(top_n)
+
+    if pattern_counts.empty:
+        # No missingness at all — return a simple message figure
+        fig = go.Figure()
+        fig.update_layout(
+            title=title,
+            annotations=[dict(text="No missing values", x=0.5, y=0.5,
+                              xref="paper", yref="paper", showarrow=False)],
+            height=300,
+        )
+        return fig
+
+    patterns = list(pattern_counts.index)        # list of tuples
+    proportions = (pattern_counts / len(df)).tolist()
+    n_patterns = len(patterns)
+
+    # x-axis positions for patterns (0-indexed)
+    x_pos = list(range(n_patterns))
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        row_heights=[0.45, 0.55],
+        shared_xaxes=True,
+        vertical_spacing=0.02,
+    )
+
+    # --- Row 1: bar chart ---
+    fig.add_trace(
+        go.Bar(
+            x=x_pos,
+            y=proportions,
+            marker_color=bar_color,
+            showlegend=False,
+            hovertemplate="Pattern %{x}<br>Proportion: %{y:.3f}<extra></extra>",
+        ),
+        row=1, col=1,
+    )
+
+    # --- Row 2: dot matrix ---
+    # Determine y positions for each variable (top variable at highest y)
+    y_labels = list(reversed(cols))  # variable 0 at bottom, last at top
+    y_map = {col: i for i, col in enumerate(y_labels)}
+
+    # Empty (background) dots for all cells
+    all_x = [xi for xi in x_pos for _ in range(n_cols)]
+    all_y = [yi for _ in x_pos for yi in range(n_cols)]
+    fig.add_trace(
+        go.Scatter(
+            x=all_x,
+            y=all_y,
+            mode="markers",
+            marker=dict(color="lightgrey", size=10, symbol="circle"),
+            showlegend=False,
+            hoverinfo="skip",
+        ),
+        row=2, col=1,
+    )
+
+    # Filled dots + vertical connecting lines for missing variables
+    for xi, pattern in enumerate(patterns):
+        missing_ys = [y_map[col] for col, is_miss in zip(cols, pattern) if is_miss]
+        if not missing_ys:
+            continue
+        # Vertical line connecting the filled dots
+        fig.add_trace(
+            go.Scatter(
+                x=[xi] * len(missing_ys),
+                y=missing_ys,
+                mode="lines",
+                line=dict(color=bar_color, width=3),
+                showlegend=False,
+                hoverinfo="skip",
+            ),
+            row=2, col=1,
+        )
+        # Filled dots
+        fig.add_trace(
+            go.Scatter(
+                x=[xi] * len(missing_ys),
+                y=missing_ys,
+                mode="markers",
+                marker=dict(color=bar_color, size=10, symbol="circle"),
+                showlegend=False,
+                hovertemplate=(
+                    "Pattern %{x}<br>"
+                    + "<br>".join(
+                        cols[j] for j, is_miss in enumerate(pattern) if is_miss
+                    )
+                    + "<extra></extra>"
+                ),
+            ),
+            row=2, col=1,
+        )
+
+    bar_height = max(200, 30 * min(top_n, n_patterns) + 60)
+    dot_height = max(160, 28 * n_cols + 40)
+
+    fig.update_layout(
+        title=title,
+        height=bar_height + dot_height,
+        margin=dict(l=100, r=20, t=50, b=40),
+        plot_bgcolor="white",
+    )
+    fig.update_xaxes(
+        tickvals=x_pos,
+        ticktext=[f"P{i+1}" for i in x_pos],
+        row=2, col=1,
+    )
+    fig.update_xaxes(showticklabels=False, row=1, col=1)
+    fig.update_yaxes(title_text="Proportion", row=1, col=1)
+    fig.update_yaxes(
+        tickvals=list(range(n_cols)),
+        ticktext=y_labels,
+        row=2, col=1,
+    )
+
+    return fig
+
+
+# ===========================================================================
 # 4. Benchmarking / scoring summary
 # ===========================================================================
 
@@ -772,4 +935,139 @@ def plot_score_table(summary_df: pd.DataFrame) -> go.Figure:
         ),
     ))
     fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=50 + 35 * len(summary_df))
+    return fig
+
+
+# ===========================================================================
+# 7. Meta-evaluation plots
+# ===========================================================================
+
+def plot_meta_eval_scenario(
+    scenario_name: str,
+    per_dataset: List[Dict],
+    score_keys: List[str],
+    score_labels: Dict[str, str],
+) -> go.Figure:
+    """
+    Per-scenario scatter plot with error bars.
+
+    Each *score_key* is shown as one group of points (mean ± std across the
+    *n_datasets* replicates).  All groups are overlaid on the same axis so the
+    relative performance across metrics for this scenario is immediately visible.
+
+    Parameters
+    ----------
+    scenario_name : str
+        Used in the chart title.
+    per_dataset : list of dicts
+        Each dict is one replicate row from ``results[scenario]["per_dataset"]``.
+    score_keys : list of str
+        Keys present in the per-dataset dicts to plot (e.g.
+        ``["fidelity_overall", "missingness_overall", "composite_score"]``).
+    score_labels : dict
+        Human-readable label for each key.
+    """
+    fig = go.Figure()
+    for i, key in enumerate(score_keys):
+        vals = [row[key] for row in per_dataset if key in row]
+        if not vals:
+            continue
+        arr = np.array(vals)
+        mean, std = float(np.mean(arr)), float(np.std(arr))
+        # Individual points
+        fig.add_trace(go.Scatter(
+            x=[score_labels.get(key, key)] * len(vals),
+            y=vals,
+            mode="markers",
+            marker=dict(color=_synth_color(i), size=7, opacity=0.5),
+            showlegend=False,
+        ))
+        # Mean ± std error bar
+        fig.add_trace(go.Scatter(
+            x=[score_labels.get(key, key)],
+            y=[mean],
+            mode="markers",
+            marker=dict(color=_synth_color(i), size=12, symbol="diamond"),
+            error_y=dict(type="data", array=[std], visible=True, color=_synth_color(i)),
+            name=score_labels.get(key, key),
+        ))
+
+    fig.update_layout(
+        title=f"{scenario_name}",
+        yaxis=dict(range=[0, 1], title="Score"),
+        xaxis_title="Metric",
+        height=380,
+        margin=dict(l=40, r=20, t=50, b=60),
+        showlegend=False,
+    )
+    return fig
+
+
+def plot_meta_eval_summary(
+    results: Dict,
+    score_keys: List[str],
+    score_labels: Dict[str, str],
+) -> go.Figure:
+    """
+    Summary plot: mean ± std of multiple scores across all scenarios.
+
+    Shows one group of error-bar markers per scenario (one marker per score
+    key), so fidelity, missingness and composite can be compared side-by-side.
+    Scenarios are displayed in the order they appear in *results*.
+
+    Parameters
+    ----------
+    results : dict
+        Full meta-evaluation results dict (keyed by scenario name).
+    score_keys : list of str
+        Score keys to plot, e.g. ``["fidelity_overall", "missingness_overall",
+        "composite_score"]``.
+    score_labels : dict
+        Mapping from score key to display label used in the legend.
+    """
+    # Collect per-scenario stats for each key, preserving results dict order
+    scenario_stats: Dict[str, Dict[str, dict]] = {}  # scenario → key → {mean, std}
+    for scenario, data in results.items():
+        per_ds = data.get("per_dataset", [])
+        for key in score_keys:
+            vals = [row[key] for row in per_ds if key in row]
+            if not vals:
+                continue
+            arr = np.array(vals)
+            scenario_stats.setdefault(scenario, {})[key] = {
+                "mean": float(np.mean(arr)),
+                "std": float(np.std(arr)),
+            }
+
+    scenarios = list(scenario_stats.keys())
+
+    trace_colors = [REAL_COLOR, SYNTH_COLORS[0], SYNTH_COLORS[2]]
+
+    fig = go.Figure()
+    for i, key in enumerate(score_keys):
+        means = [scenario_stats[s].get(key, {}).get("mean", None) for s in scenarios]
+        stds = [scenario_stats[s].get(key, {}).get("std", None) for s in scenarios]
+        color = trace_colors[i % len(trace_colors)]
+        fig.add_trace(go.Scatter(
+            x=scenarios,
+            y=means,
+            name=score_labels.get(key, key),
+            mode="markers",
+            marker=dict(size=11, color=color),
+            error_y=dict(type="data", array=stds, visible=True, color=color),
+            text=[
+                f"mean={m:.4f}<br>std={s:.4f}" if m is not None else ""
+                for m, s in zip(means, stds)
+            ],
+            hovertemplate="%{x}<br>%{text}<extra>" + score_labels.get(key, key) + "</extra>",
+        ))
+
+    fig.update_layout(
+        title="Summary across scenarios",
+        yaxis=dict(range=[0, 1], title="Score"),
+        xaxis_tickangle=-35,
+        height=420,
+        margin=dict(l=40, r=20, t=50, b=120),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
     return fig

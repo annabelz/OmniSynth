@@ -46,3 +46,6 @@ examples/example_config.yaml
 # Outputs
 results*.json
 reports/
+
+# Meta-evaluation generated datasets and results
+examples/meta_eval/
