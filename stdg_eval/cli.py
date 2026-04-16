@@ -172,6 +172,18 @@ def _cmd_precompute(args):
     print(f"  precomputed_results: {out}")
 
 
+def _cmd_meta_eval(args):
+    from stdg_eval.meta_eval.config import load_meta_eval_config
+    from stdg_eval.meta_eval.runner import run_meta_eval, save_meta_eval_results
+
+    cfg = load_meta_eval_config(args.config)
+    results = run_meta_eval(cfg, verbose=True)
+
+    out = Path(cfg.results_path)
+    save_meta_eval_results(results, out)
+    print(f"\nMeta-evaluation results saved to {out}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="stdg-eval",
@@ -212,6 +224,16 @@ def main():
              "Currently supported: univariate, bivariate, multivariate, missingness.",
     )
 
+    # meta-eval sub-command
+    meta_p = sub.add_parser(
+        "meta-eval",
+        help="Generate noisy scenario datasets and run benchmark evaluation.",
+    )
+    meta_p.add_argument(
+        "--config", type=Path, required=True,
+        help="Path to a meta-evaluation YAML config file.",
+    )
+
     args = parser.parse_args()
 
     if args.command == "dashboard":
@@ -220,5 +242,7 @@ def main():
         _cmd_evaluate(args)
     elif args.command == "precompute":
         _cmd_precompute(args)
+    elif args.command == "meta-eval":
+        _cmd_meta_eval(args)
     else:
         parser.print_help()

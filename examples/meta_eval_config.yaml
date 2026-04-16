@@ -1,0 +1,23 @@
+input_data: examples/data/real.csv
+
+output_dir: examples/meta_eval/noisy/
+
+results_path: examples/meta_eval/results.json
+
+scenarios:
+  - name: fidelity_1
+    n_datasets: 10
+
+column_types:
+  age: numerical
+  bmi: numerical
+  sbp: numerical
+  sex: categorical
+  diagnosis: categorical
+  smoker: categorical
+
+axes:
+  - fidelity
+  - missingness
+
+random_seed: 42
