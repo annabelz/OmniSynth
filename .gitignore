@@ -41,6 +41,7 @@ data/
 examples/data/
 *.parquet
 datasets/
+examples/example_config.yaml
 
 # Outputs
 results*.json
