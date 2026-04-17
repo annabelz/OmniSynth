@@ -1,27 +1,38 @@
-input_data: /home/annabelzhu/Repositories/stdg-eval/examples/data/real.csv
-output_dir: /home/annabelzhu/Repositories/stdg-eval/examples/meta_eval/noisy
-results_path: /home/annabelzhu/Repositories/stdg-eval/examples/meta_eval/results.json
-scenarios:
-- name: fidelity_1
-  n_datasets: 100
-- name: fidelity_2
-  n_datasets: 100
-- name: fidelity_3
-  n_datasets: 100
-- name: fidelity_4
-  n_datasets: 100
-- name: fidelity_5
-  n_datasets: 100
-- name: missingness_1
-  n_datasets: 100
-- name: missingness_2
-  n_datasets: 100
-- name: missingness_3
-  n_datasets: 100
-- name: missingness_4
-  n_datasets: 100
-- name: missingness_5
-  n_datasets: 100
+# stdg-eval meta-evaluation configuration
+# -----------------------------------------------------------
+# Run the meta-evaluation pipeline with this config:
+#   stdg-eval meta-eval --config examples/meta_eval_config.yaml
+#
+# The pipeline generates programmatically noisy datasets for each scenario,
+# evaluates them, and writes aggregated results to results_path.
+# Load results_path in the dashboard config (meta_eval_results key) to view
+# the Meta-evaluation tab.
+
+# Path to the real (ground-truth) dataset CSV
+input_data: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/real.csv
+
+# Directory where generated noisy datasets are written (one sub-folder per scenario)
+output_dir: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/meta_eval/noisy
+
+# Path where the JSON results file is written
+results_path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/meta_eval/results.json
+
+# Optional: base random seed (default 42). Dataset i within each scenario uses
+# seed random_seed + i, so results are fully reproducible.
+random_seed: 42
+
+# Optional: verbosity level — none | some | all (default: some)
+#   none — no output
+#   some — scenario banners, per-dataset score lines, checkpoints, summaries
+#   all  — everything in "some" plus generation progress and per-metric prints
+verbose: some
+
+# Optional: evaluation axes to run (default: both)
+axes:
+  - fidelity
+  - missingness
+
+# Optional: override automatic column type inference
 column_types:
   age: numerical
   bmi: numerical
@@ -29,7 +40,55 @@ column_types:
   sex: categorical
   diagnosis: categorical
   smoker: categorical
-axes:
-- fidelity
-- missingness
-random_seed: 42
+
+# Scenarios to run. Each entry requires a name (from the registry below) and
+# n_datasets (number of noisy replicates to generate and evaluate).
+#
+# Available fidelity scenarios
+# ----------------------------
+# fidelity_1  Low Gaussian noise, all variables
+#               numerical/ordinal: N(0, 1·std); categorical: one-hot + N(0,1) → argmax
+# fidelity_2  Low Gaussian noise, numerical/ordinal only
+#               same as fidelity_1 for numerical/ordinal; categorical unchanged
+# fidelity_3  High Gaussian noise, all variables
+#               numerical/ordinal: N(0, 2·std); categorical: pure N(0,1) → argmax (random reassignment)
+# fidelity_4  High Gaussian noise, numerical/ordinal only
+#               same as fidelity_3 for numerical/ordinal; categorical unchanged
+# fidelity_5  Structured bivariate noise
+#               one (variable-pair, quartile) perturbation per dataset; cycles
+#               all pairs × 4 quartiles across datasets
+#
+# Available missingness scenarios
+# --------------------------------
+# missingness_1  10% MCAR — 10% of observed cells replaced with NaN at random
+# missingness_2  20% MCAR — 20% of observed cells replaced with NaN at random
+# missingness_3  30% MCAR — 30% of observed cells replaced with NaN at random
+# missingness_4  MAR bivariate — rows in a quartile of variable A have 50% of
+#                their B values masked; cycles all ordered (A,B) pairs × 4 quartiles
+# missingness_5  MNAR self-conditioning — rows in a quartile of variable X have
+#                50% of their X values masked; cycles all variables × 4 quartiles
+
+scenarios:
+  # --- Fidelity ---
+  - name: fidelity_1
+    n_datasets: 10
+  - name: fidelity_2
+    n_datasets: 10
+  - name: fidelity_3
+    n_datasets: 10
+  - name: fidelity_4
+    n_datasets: 10
+  - name: fidelity_5
+    n_datasets: 10
+
+  # --- Missingness ---
+  - name: missingness_1
+    n_datasets: 10
+  - name: missingness_2
+    n_datasets: 10
+  - name: missingness_3
+    n_datasets: 10
+  - name: missingness_4
+    n_datasets: 10
+  - name: missingness_5
+    n_datasets: 10

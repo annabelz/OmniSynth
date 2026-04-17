@@ -63,8 +63,15 @@ class MetaEvalConfig:
     """Evaluation axes to run (``"fidelity"`` and/or ``"missingness"``)."""
     random_seed: int = 42
     """Base random seed passed to all scenario functions."""
-    verbose: bool = True
-    """Print per-metric progress to stdout during evaluation."""
+    verbose: str = "some"
+    """Verbosity level: ``"none"`` | ``"some"`` | ``"all"``.
+
+    - ``"none"`` — no output.
+    - ``"some"`` — scenario banners, per-dataset score lines, checkpoints,
+      and final summaries.
+    - ``"all"``  — everything in ``"some"`` plus per-dataset generation
+      progress and per-metric prints.
+    """
 
 
 def load_meta_eval_config(path: str | Path) -> MetaEvalConfig:
@@ -89,5 +96,5 @@ def load_meta_eval_config(path: str | Path) -> MetaEvalConfig:
         column_types=raw.get("column_types") or None,
         axes=raw.get("axes", ["fidelity", "missingness"]),
         random_seed=int(raw.get("random_seed", 42)),
-        verbose=bool(raw.get("verbose", True)),
+        verbose=str(raw.get("verbose", "some")),
     )

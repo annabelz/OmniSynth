@@ -177,7 +177,7 @@ def _cmd_meta_eval(args):
     from stdg_eval.meta_eval.runner import run_meta_eval, save_meta_eval_results
 
     cfg = load_meta_eval_config(args.config)
-    results = run_meta_eval(cfg, verbose=True)
+    results = run_meta_eval(cfg)
 
     out = Path(cfg.results_path)
     save_meta_eval_results(results, out)

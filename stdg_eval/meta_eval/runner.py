@@ -30,43 +30,34 @@ from stdg_eval.meta_eval.scenarios import SCENARIO_REGISTRY
 from stdg_eval.utils.data_utils import detect_column_types
 
 
-def run_meta_eval(config: MetaEvalConfig, verbose: Optional[bool] = None) -> Dict:
+def run_meta_eval(config: MetaEvalConfig, verbose: Optional[str] = None) -> Dict:
     """
     Run a full meta-evaluation as described in *config*.
 
     Parameters
     ----------
     config : MetaEvalConfig
-    verbose : bool
-        Print progress to stdout.
+    verbose : str, optional
+        Override ``config.verbose``.  One of ``"none"``, ``"some"``, ``"all"``.
+
+        - ``"none"`` — no output.
+        - ``"some"`` — scenario banners, per-dataset score lines, checkpoints,
+          and final summaries.
+        - ``"all"``  — everything in ``"some"`` plus per-dataset generation
+          progress and per-metric prints.
 
     Returns
     -------
     dict
-        Nested results dict, one entry per scenario::
-
-            {
-              "fidelity_1": {
-                "n_datasets": 20,
-                "fidelity": {
-                  "overall": {"mean": 0.83, "std": 0.02},
-                  "univariate": {"mean": ..., "std": ...},
-                  ...
-                },
-                "missingness": {
-                  "overall": {"mean": ..., "std": ...},
-                  ...
-                },
-                "composite": {"mean": ..., "std": ...},
-                "per_dataset": [         # one entry per replicate
-                  {"fidelity_score": ..., "missingness_score": ..., "composite_score": ...},
-                  ...
-                ],
-              },
-              ...
-            }
+        Nested results dict, one entry per scenario.
     """
     verbose = config.verbose if verbose is None else verbose
+    if verbose not in ("none", "some", "all"):
+        raise ValueError(f"verbose must be 'none', 'some', or 'all', got {verbose!r}")
+
+    show_some = verbose in ("some", "all")
+    show_all = verbose == "all"
+
     real = pd.read_csv(config.input_data)
     col_types = detect_column_types(real, override=config.column_types)
 
@@ -83,7 +74,7 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[bool] = None) -> Dic
                 f"Available: {sorted(SCENARIO_REGISTRY.keys())}"
             )
 
-        if verbose:
+        if show_some:
             print(f"\n{'='*60}")
             print(f"Scenario: {name}  ({scenario_cfg.n_datasets} datasets)")
             print(f"{'='*60}")
@@ -108,17 +99,18 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[bool] = None) -> Dic
             col_types=col_types,
             prefix=name,
             random_seed=config.random_seed,
+            verbose=show_all,
             **scenario_cfg.params,
         )
 
-        if verbose:
+        if show_some:
             print(f"  Generated {len(paths)} datasets in {scenario_dir}")
 
         # ------------------------------------------------------------------
         # 2. Evaluate each dataset
         # ------------------------------------------------------------------
         per_dataset: List[Dict] = []
-        fid_score_lists: Dict[str, List[float]] = {}   # key → list of scores
+        fid_score_lists: Dict[str, List[float]] = {}
         miss_score_lists: Dict[str, List[float]] = {}
         composite_list: List[float] = []
 
@@ -126,20 +118,20 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[bool] = None) -> Dic
             synth = pd.read_csv(path)
             row: Dict = {"path": path}
 
-            if verbose:
+            if show_all:
                 print(f"\n  [{i+1:>{len(str(len(paths)))}}/{len(paths)}] {Path(path).name}", flush=True)
 
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
 
                 if run_fidelity:
-                    fid = evaluate_fidelity(real, synth, col_types=col_types, verbose=verbose)
+                    fid = evaluate_fidelity(real, synth, col_types=col_types, verbose=show_all)
                     f_scores = compute_fidelity_score(fid)
                 else:
                     f_scores = {}
 
                 if run_missingness:
-                    miss = evaluate_missingness(real, synth, col_types=col_types, verbose=verbose)
+                    miss = evaluate_missingness(real, synth, col_types=col_types, verbose=show_all)
                     m_scores = compute_missingness_score(miss)
                 else:
                     m_scores = {}
@@ -162,7 +154,7 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[bool] = None) -> Dic
 
             per_dataset.append(row)
 
-            if verbose:
+            if show_some:
                 parts = []
                 if "overall" in f_scores:
                     parts.append(f"fidelity={f_scores['overall']:.4f}")
@@ -170,7 +162,7 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[bool] = None) -> Dic
                     parts.append(f"missingness={m_scores['overall']:.4f}")
                 if comp.get("composite") is not None:
                     parts.append(f"composite={comp['composite']:.4f}")
-                print(f"    → {', '.join(parts)}", flush=True)
+                print(f"  [{i+1:>{len(str(len(paths)))}}/{len(paths)}] → {', '.join(parts)}", flush=True)
 
         # ------------------------------------------------------------------
         # 3. Aggregate
@@ -195,11 +187,10 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[bool] = None) -> Dic
 
         all_results[name] = scenario_result
 
-        # Checkpoint: write results so far so progress isn't lost on interruption
         if config.results_path:
             save_meta_eval_results(all_results, config.results_path)
 
-        if verbose:
+        if show_some:
             n_done = list(all_results.keys())
             n_total = len(config.scenarios)
             print(f"\n  ✓ Checkpoint: {len(n_done)}/{n_total} scenarios complete "

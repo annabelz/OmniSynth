@@ -21,8 +21,11 @@ results_path: meta_eval/results.json
 # seed random_seed + i, so results are fully reproducible.
 random_seed: 42
 
-# Optional: print per-metric progress to terminal during evaluation (default: true)
-verbose: true
+# Optional: verbosity level — none | some | all (default: some)
+#   none — no output
+#   some — scenario banners, per-dataset score lines, checkpoints, summaries
+#   all  — everything in "some" plus generation progress and per-metric prints
+verbose: some
 
 # Optional: evaluation axes to run (default: both)
 axes:
