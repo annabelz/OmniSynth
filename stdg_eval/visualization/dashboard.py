@@ -37,6 +37,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import streamlit as st
+from scipy.stats import rankdata
 
 from stdg_eval.config import (
     DEFAULT_COMPOSITE_WEIGHTS,
@@ -109,6 +110,7 @@ def _init_state():
         # Precomputed bivariate/multivariate results loaded from JSON
         # {synth_name: {group: {metric_key: MetricResult}}}
         "precomputed_results": {},
+        "meta_eval_results": None,   # loaded from meta_eval_results path in config
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -173,6 +175,14 @@ def _sidebar():
                         )
                     except Exception as exc:
                         st.sidebar.warning(f"Could not load precomputed results: {exc}")
+                # Meta-evaluation results
+                if "meta_eval_results" in cfg:
+                    try:
+                        import json as _json
+                        with open(cfg["meta_eval_results"]) as _f:
+                            st.session_state["meta_eval_results"] = _json.load(_f)
+                    except Exception as exc:
+                        st.sidebar.warning(f"Could not load meta-eval results: {exc}")
                 # Metric enable flags from config — only applied when a new config
                 # file is loaded (detected via content hash). After initial load the
                 # sidebar checkboxes are the source of truth and are not overwritten,
@@ -196,6 +206,23 @@ def _sidebar():
                     st.session_state["run_miss_auroc"] = mc.run_missing_auroc
                     st.session_state["run_miss_dep"] = mc.run_dependency_structure
                 st.session_state["_config_hash"] = cfg_hash
+
+                # --- Load summary note ---
+                note_lines = [f"**Real dataset:** `{cfg['real_data']}`"]
+                synth_entries = cfg.get("synthetic_datasets", [])
+                if synth_entries:
+                    note_lines.append(f"**Synthetic datasets** ({len(synth_entries)}):")
+                    for entry in synth_entries:
+                        note_lines.append(f"- `{entry['name']}`: `{entry['path']}`")
+                precomputed_loaded = bool(st.session_state.get("precomputed_results"))
+                note_lines.append(
+                    f"**Precomputed results:** {'loaded' if precomputed_loaded else 'not found'}"
+                )
+                meta_loaded = bool(st.session_state.get("meta_eval_results"))
+                note_lines.append(
+                    f"**Meta-eval results:** {'loaded' if meta_loaded else 'not found'}"
+                )
+                st.sidebar.info("\n\n".join(note_lines))
             except Exception as e:
                 st.sidebar.error(f"Failed to load config: {e}")
 
@@ -237,33 +264,10 @@ def _sidebar():
     st.sidebar.divider()
     st.sidebar.subheader("3 · Evaluate")
 
-    # Precomputed results upload (alternative / supplement to config reference)
-    with st.sidebar.expander("Precomputed results (optional)", expanded=False):
-        st.caption(
-            "Upload a JSON file produced by `stdg-eval precompute` to skip "
-            "recomputing expensive bivariate / multivariate metrics."
-        )
-        pre_file = st.file_uploader(
-            "Precomputed results (.json)", type=["json"], key="precomputed_upload"
-        )
-        if pre_file:
-            try:
-                import tempfile
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
-                    tmp.write(pre_file.read())
-                    tmp_path = tmp.name
-                st.session_state["precomputed_results"] = load_precomputed(tmp_path)
-                os.unlink(tmp_path)
-                n_synths = len(st.session_state["precomputed_results"])
-                st.success(f"Loaded precomputed results for {n_synths} dataset(s).")
-            except Exception as exc:
-                st.error(f"Failed to load precomputed results: {exc}")
-        elif st.session_state.get("precomputed_results"):
-            n_synths = len(st.session_state["precomputed_results"])
-            st.info(f"Using precomputed results for {n_synths} dataset(s) (loaded from config).")
-            if st.button("Clear precomputed results"):
-                st.session_state["precomputed_results"] = {}
-                st.rerun()
+    # Precomputed results status (loaded from config via precomputed_results key)
+    if st.session_state.get("precomputed_results"):
+        n_synths = len(st.session_state["precomputed_results"])
+        st.sidebar.caption(f"Precomputed results loaded for {n_synths} dataset(s).")
 
     with st.sidebar.expander("Metric options", expanded=False):
         for group in FIDELITY_GROUPS:
@@ -726,6 +730,7 @@ def _tab_individual():
         with st.expander("Missingness", expanded=True):
             rate_res = miss_res.get("rate")
             set_res = miss_res.get("set_distribution")
+            auroc_res = miss_res.get("missing_auroc")
             dep_res = miss_res.get("dependency_structure")
 
             if rate_res:
@@ -746,6 +751,23 @@ def _tab_individual():
             with miss_pattern_cols[1]:
                 st.markdown(f"**{selected} — missingness pattern**")
                 fig = P.plot_missingness_pattern_heatmap(synth[shared_cols], title=f"{selected}: missingness pattern")
+                st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("**Missingness pattern frequency (UpSet)**")
+            upset_cols = st.columns(2)
+            with upset_cols[0]:
+                fig = P.plot_missingness_upset(
+                    real[shared_cols],
+                    title="Real",
+                    bar_color=P.REAL_COLOR,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            with upset_cols[1]:
+                fig = P.plot_missingness_upset(
+                    synth[shared_cols],
+                    title=selected,
+                    bar_color=P.SYNTH_COLORS[0],
+                )
                 st.plotly_chart(fig, use_container_width=True)
 
             if dep_res and "columns" in dep_res.details:
@@ -770,6 +792,15 @@ def _tab_individual():
                             P.plot_missingness_dependency_diff(real_dep, synth_dep, "Difference (real − synth)"),
                             use_container_width=True,
                         )
+
+            if auroc_res and "auroc_real" in auroc_res.details:
+                st.markdown("**Missingness AUROC per variable**")
+                fig = P.plot_missing_auroc(
+                    auroc_res.details["auroc_real"],
+                    auroc_res.details["auroc_synth"],
+                    synth_label=selected,
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
             if set_res:
                 st.caption(
@@ -1543,6 +1574,407 @@ def _tab_dataset_description():
 
 
 # ===========================================================================
+# Tab 5: Ranking report (Yan et al. 2022)
+# ===========================================================================
+
+def _tab_ranking():
+    """
+    Ranking mechanism following Yan et al. (2022) — datasets ranked per metric
+    (rank 1 = best score), ties receive the average of tied ranks.
+
+    Hierarchy mirrors the scoring system:
+      1. Per-metric ranks within each fidelity group → average → group rank
+      2. Group ranks weighted by fidelity group weights → fidelity axis rank
+      3. Per-metric ranks within missingness weighted by missingness metric weights
+         → missingness axis rank
+      4. Fidelity + missingness axis ranks weighted by composite weights
+         → final rank score  (lower = better)
+
+    Uses the same weight values as set in the weight controls.
+
+    Reference: Yan C, Yan Y, Wan Z, Zhang Z, Omberg L, Guinney J, et al.
+    A Multifaceted benchmarking of synthetic electronic health record generation
+    models. Nat Commun. 2022 Dec 9;13(1):7609.
+    doi:10.1038/s41467-022-35295-1. PMID: 36494374.
+    """
+    st.header("Ranking Report")
+    st.caption(
+        "Ranks synthetic datasets relative to each other following Yan et al. (*Nat Commun* 2022). "
+        "For each metric, datasets are ranked by score (rank 1 = best; ties → average rank). "
+        "Ranks are aggregated using the same hierarchical weights as the scoring system — "
+        "**lower final rank score = better**."
+    )
+
+    synths = st.session_state["synth_dfs"]
+    fid_all = st.session_state["fidelity_results"]
+    miss_all = st.session_state["missingness_results"]
+
+    if not synths or (not fid_all and not miss_all):
+        st.info("Run evaluation first (sidebar → **▶ Run evaluation**).")
+        return
+
+    run_names = list(synths.keys())
+    if len(run_names) < 2:
+        st.info("Ranking requires at least 2 synthetic datasets.")
+        return
+
+    n = len(run_names)
+    fidelity_weights, miss_weights, composite_weights = _get_weights()
+
+    # ------------------------------------------------------------------
+    # Helper: rank a score dict (higher score → rank 1)
+    # ------------------------------------------------------------------
+    def _ranks(scores_dict: Dict[str, float]) -> Dict[str, float]:
+        eligible = [name for name in run_names if name in scores_dict]
+        if len(eligible) < 2:
+            return {}
+        arr = np.array([scores_dict[name] for name in eligible])
+        ranks = rankdata(-arr, method="average")
+        return dict(zip(eligible, map(float, ranks)))
+
+    # ------------------------------------------------------------------
+    # Per-metric ranks + group-level average ranks (fidelity)
+    # ------------------------------------------------------------------
+    per_metric_ranks: Dict[str, Dict[str, float]] = {}   # display_label → {dataset: rank}
+    fid_group_ranks: Dict[str, Dict[str, float]] = {}    # group_key → {dataset: avg_rank}
+
+    for g, g_weight in zip(FIDELITY_GROUPS, fidelity_weights):
+        if g_weight == 0.0:
+            continue
+        metric_rank_list: List[Dict[str, float]] = []
+        for m in g["metrics"]:
+            key = m["key"]
+            scores = {
+                name: fid_all[name][g["key"]][key].score
+                for name in run_names
+                if name in fid_all
+                and g["key"] in fid_all[name]
+                and key in fid_all[name][g["key"]]
+            }
+            if not scores:
+                continue
+            ranks = _ranks(scores)
+            if ranks:
+                label = f"{m['label']} ({g['label']})"
+                per_metric_ranks[label] = ranks
+                metric_rank_list.append(ranks)
+
+        if metric_rank_list:
+            # Average per-metric ranks within the group
+            all_ds = set().union(*[r.keys() for r in metric_rank_list])
+            fid_group_ranks[g["key"]] = {
+                ds: float(np.mean([r[ds] for r in metric_rank_list if ds in r]))
+                for ds in all_ds
+            }
+
+    # ------------------------------------------------------------------
+    # Per-metric ranks (missingness)
+    # ------------------------------------------------------------------
+    miss_metric_ranks: List[Tuple[Dict[str, float], float]] = []  # (ranks, weight)
+
+    for m, m_weight in zip(MISSINGNESS_METRICS, miss_weights):
+        if m_weight == 0.0:
+            continue
+        key = m["key"]
+        scores = {
+            name: miss_all[name][key].score
+            for name in run_names
+            if name in miss_all and key in miss_all[name]
+        }
+        if not scores:
+            continue
+        ranks = _ranks(scores)
+        if ranks:
+            label = f"{m['label']} (Missingness)"
+            per_metric_ranks[label] = ranks
+            miss_metric_ranks.append((ranks, m_weight))
+
+    # ------------------------------------------------------------------
+    # Fidelity axis rank = weighted average of group ranks
+    # ------------------------------------------------------------------
+    fid_axis_ranks: Dict[str, float] = {}
+    if fid_group_ranks:
+        g_weight_map = {g["key"]: w for g, w in zip(FIDELITY_GROUPS, fidelity_weights)}
+        for name in run_names:
+            wsum, wtotal = 0.0, 0.0
+            for gk, group_ranks in fid_group_ranks.items():
+                w = g_weight_map.get(gk, 0.0)
+                if name in group_ranks and w > 0:
+                    wsum += w * group_ranks[name]
+                    wtotal += w
+            if wtotal > 0:
+                fid_axis_ranks[name] = wsum / wtotal
+
+    # ------------------------------------------------------------------
+    # Missingness axis rank = weighted average of metric ranks
+    # ------------------------------------------------------------------
+    miss_axis_ranks: Dict[str, float] = {}
+    if miss_metric_ranks:
+        for name in run_names:
+            wsum, wtotal = 0.0, 0.0
+            for ranks, w in miss_metric_ranks:
+                if name in ranks and w > 0:
+                    wsum += w * ranks[name]
+                    wtotal += w
+            if wtotal > 0:
+                miss_axis_ranks[name] = wsum / wtotal
+
+    # ------------------------------------------------------------------
+    # Final composite rank = weighted average of axis ranks
+    # ------------------------------------------------------------------
+    w_fid, w_miss = composite_weights[0], composite_weights[1]
+    final_scores: Dict[str, float] = {}
+    for name in run_names:
+        wsum, wtotal = 0.0, 0.0
+        if name in fid_axis_ranks and w_fid > 0:
+            wsum += w_fid * fid_axis_ranks[name]
+            wtotal += w_fid
+        if name in miss_axis_ranks and w_miss > 0:
+            wsum += w_miss * miss_axis_ranks[name]
+            wtotal += w_miss
+        if wtotal > 0:
+            final_scores[name] = wsum / wtotal
+
+    if not final_scores:
+        st.info("Not enough data to compute ranks.")
+        return
+
+    # Sort datasets by final rank score (ascending = best first)
+    sorted_names = [name for name, _ in sorted(final_scores.items(), key=lambda x: x[1])]
+
+    best = sorted_names[0]
+    st.success(f"Best overall dataset: **{best}**")
+    st.divider()
+
+    # ------------------------------------------------------------------
+    # Bar chart (rank 1 → 1.0, rank N → 0.0 so higher bar = better)
+    # ------------------------------------------------------------------
+    bar_scores = (
+        {name: (n - final_scores[name]) / (n - 1) for name in sorted_names}
+        if n > 1 else {name: 1.0 for name in sorted_names}
+    )
+    fig = P.plot_score_bar(bar_scores, title="Relative ranking (higher = better)")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ------------------------------------------------------------------
+    # Fidelity rank table — MultiIndex columns (group → metric)
+    # ------------------------------------------------------------------
+    if fid_group_ranks:
+        st.subheader("Fidelity ranks")
+        st.caption(
+            "Ranks per metric (1 = best). Column headers show normalised group weights. "
+            "**Fidelity rank** = weighted average of group ranks."
+        )
+
+        total_fid_w = sum(fidelity_weights)
+        col_tuples: List[Tuple[str, str]] = []
+        col_data: Dict[Tuple[str, str], Dict[str, float]] = {}
+
+        for g, g_weight in zip(FIDELITY_GROUPS, fidelity_weights):
+            if g_weight == 0.0:
+                continue
+            norm_w = g_weight / total_fid_w if total_fid_w > 0 else 0.0
+            g_header = f"{g['label']}  (w={norm_w:.2f})"
+            for m in g["metrics"]:
+                label_key = f"{m['label']} ({g['label']})"
+                if label_key not in per_metric_ranks:
+                    continue
+                ct = (g_header, m["label"])
+                col_tuples.append(ct)
+                col_data[ct] = {
+                    name: round(per_metric_ranks[label_key].get(name, float("nan")), 2)
+                    for name in sorted_names
+                }
+
+        ct_total = ("Total", "Fidelity rank")
+        col_tuples.append(ct_total)
+        col_data[ct_total] = {
+            name: round(fid_axis_ranks.get(name, float("nan")), 2)
+            for name in sorted_names
+        }
+
+        if col_tuples:
+            fid_df = pd.DataFrame(
+                {ct: col_data[ct] for ct in col_tuples},
+                index=sorted_names,
+            )
+            fid_df.columns = pd.MultiIndex.from_tuples(col_tuples)
+            fid_df.index.name = "Dataset"
+            st.dataframe(fid_df.style.format("{:.2f}", na_rep="—"), use_container_width=True)
+
+    # ------------------------------------------------------------------
+    # Missingness rank table — flat columns with normalised weights in header
+    # ------------------------------------------------------------------
+    if miss_axis_ranks:
+        st.subheader("Missingness ranks")
+        st.caption(
+            "Ranks per metric (1 = best). Column headers show normalised metric weights. "
+            "**Missingness rank** = weighted average of metric ranks."
+        )
+
+        total_miss_w = sum(w for _, w in miss_metric_ranks)
+        miss_col_data: Dict[str, Dict[str, float]] = {}
+
+        for m, m_weight in zip(MISSINGNESS_METRICS, miss_weights):
+            if m_weight == 0.0:
+                continue
+            label_key = f"{m['label']} (Missingness)"
+            if label_key not in per_metric_ranks:
+                continue
+            norm_w = m_weight / total_miss_w if total_miss_w > 0 else 0.0
+            col_name = f"{m['label']}  (w={norm_w:.2f})"
+            miss_col_data[col_name] = {
+                name: round(per_metric_ranks[label_key].get(name, float("nan")), 2)
+                for name in sorted_names
+            }
+
+        miss_col_data["Missingness rank"] = {
+            name: round(miss_axis_ranks.get(name, float("nan")), 2)
+            for name in sorted_names
+        }
+
+        miss_df = pd.DataFrame(miss_col_data, index=sorted_names)
+        miss_df.index.name = "Dataset"
+        st.dataframe(miss_df.style.format("{:.2f}", na_rep="—"), use_container_width=True)
+
+
+# ===========================================================================
+# Tab 6: Meta-evaluation report
+# ===========================================================================
+
+def _tab_meta_eval():
+    st.header("Meta-evaluation Report")
+    st.caption(
+        "Results from running the benchmark on programmatically generated noisy datasets. "
+        "Each scenario is evaluated across multiple replicates; points show individual "
+        "replicate scores, diamonds show mean ± std."
+    )
+
+    meta = st.session_state.get("meta_eval_results")
+    if not meta:
+        st.info(
+            "No meta-evaluation results loaded. "
+            "Add ``meta_eval_results: path/to/results.json`` to your config file, "
+            "or run ``stdg-eval meta-eval --config <config>`` first."
+        )
+        return
+
+    # Score keys present across all scenarios
+    all_per_ds_keys: set = set()
+    for data in meta.values():
+        for row in data.get("per_dataset", []):
+            all_per_ds_keys.update(k for k, v in row.items() if isinstance(v, float))
+
+    score_label_map = {
+        "fidelity_overall":            "Fidelity (overall)",
+        "fidelity_univariate":         "Fidelity — Univariate",
+        "fidelity_bivariate":          "Fidelity — Bivariate",
+        "fidelity_multivariate":       "Fidelity — Multivariate",
+        "missingness_overall":         "Missingness (overall)",
+        "missingness_rate":            "Missingness — Rate",
+        "missingness_set_distribution":"Missingness — Pattern",
+        "missingness_missing_auroc":   "Missingness — AUROC",
+        "missingness_dependency_structure": "Missingness — Dependency",
+        "composite_score":             "Composite",
+    }
+    available_keys = [k for k in score_label_map if k in all_per_ds_keys]
+
+    if not available_keys:
+        st.warning("No numeric score columns found in meta-eval results.")
+        return
+
+    # ------------------------------------------------------------------
+    # Summary plot — fidelity, missingness, composite on one plot
+    # ------------------------------------------------------------------
+    st.subheader("Summary across scenarios")
+    axis_filter = st.selectbox(
+        "Show scenarios for axis",
+        ["All", "Fidelity", "Missingness"],
+        key="meta_summary_axis",
+    )
+    all_scenarios = list(meta.keys())
+    if axis_filter == "Fidelity":
+        filtered_scenarios = [s for s in all_scenarios if s.startswith("fidelity")]
+    elif axis_filter == "Missingness":
+        filtered_scenarios = [s for s in all_scenarios if s.startswith("missingness")]
+    else:
+        filtered_scenarios = all_scenarios
+    filtered_meta = {s: meta[s] for s in filtered_scenarios}
+    summary_keys = [k for k in ("fidelity_overall", "missingness_overall", "composite_score") if k in all_per_ds_keys]
+    if summary_keys and filtered_meta:
+        fig = P.plot_meta_eval_summary(filtered_meta, summary_keys, score_label_map)
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ------------------------------------------------------------------
+    # Per-scenario plots
+    # ------------------------------------------------------------------
+    st.subheader("Per-scenario breakdown")
+
+    # Fixed top-level keys shown in every plot
+    plot_keys = [k for k in ("fidelity_overall", "missingness_overall", "composite_score") if k in all_per_ds_keys]
+
+    # Sub-metric keys shown as tables beneath each plot
+    _fidelity_sub_keys = [
+        "fidelity_univariate", "fidelity_bivariate", "fidelity_multivariate",
+    ]
+    _missingness_sub_keys = [
+        "missingness_rate", "missingness_set_distribution",
+        "missingness_missing_auroc", "missingness_dependency_structure",
+    ]
+    fidelity_sub_keys    = [k for k in _fidelity_sub_keys    if k in all_per_ds_keys]
+    missingness_sub_keys = [k for k in _missingness_sub_keys if k in all_per_ds_keys]
+    sub_keys = fidelity_sub_keys + missingness_sub_keys
+
+    # Preserve config-file ordering (insertion order of meta dict)
+    fidelity_scenarios    = [s for s in meta if s.startswith("fidelity")]
+    missingness_scenarios = [s for s in meta if s.startswith("missingness")]
+    other_scenarios       = [s for s in meta if s not in fidelity_scenarios + missingness_scenarios]
+
+    for group_label, group in [
+        ("Fidelity scenarios",    fidelity_scenarios),
+        ("Missingness scenarios",  missingness_scenarios),
+        ("Other scenarios",        other_scenarios),
+    ]:
+        if not group:
+            continue
+        st.markdown(f"**{group_label}**")
+        cols = st.columns(min(len(group), 3))
+        for i, scenario in enumerate(group):
+            per_ds = meta[scenario].get("per_dataset", [])
+            n = meta[scenario].get("n_datasets", len(per_ds))
+            with cols[i % 3]:
+                fig = P.plot_meta_eval_scenario(
+                    scenario_name=f"{scenario}  (n={n})",
+                    per_dataset=per_ds,
+                    score_keys=plot_keys,
+                    score_labels=score_label_map,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                # Sub-metric score table
+                present_sub = [k for k in sub_keys if any(k in row for row in per_ds)]
+                if present_sub:
+                    table_rows = []
+                    for k in present_sub:
+                        vals = [row[k] for row in per_ds if k in row]
+                        if not vals:
+                            continue
+                        arr = np.array(vals)
+                        table_rows.append({
+                            "Metric": score_label_map.get(k, k),
+                            "Mean": f"{float(np.mean(arr)):.4f}",
+                            "Std": f"{float(np.std(arr)):.4f}",
+                        })
+                    if table_rows:
+                        st.dataframe(
+                            pd.DataFrame(table_rows),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+
+# ===========================================================================
 # Main app entry point
 # ===========================================================================
 
@@ -1570,7 +2002,7 @@ def run_dashboard():
 
     _weight_controls()
 
-    tab0, tab1, tab2, tab3, tab4 = st.tabs(["🗂 Dataset Description", "📊 Individual Report", "🏆 Benchmarking Report", "📋 Score Summary", "🔗 Metric Correlations"])
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🗂 Dataset Description", "📊 Individual Report", "🏆 Benchmarking Report", "📋 Score Summary", "🔗 Metric Correlations", "🥇 Ranking", "🧪 Meta-evaluation"])
     with tab0:
         _tab_dataset_description()
     with tab1:
@@ -1581,6 +2013,10 @@ def run_dashboard():
         _tab_score_summary()
     with tab4:
         _tab_metric_correlation()
+    with tab5:
+        _tab_ranking()
+    with tab6:
+        _tab_meta_eval()
 
 
 if __name__ == "__main__":

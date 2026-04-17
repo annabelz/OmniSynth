@@ -197,6 +197,9 @@ real_data.to_csv(data_dir / "real.csv", index=False)
 for name, df in datasets.items():
     df.to_csv(data_dir / f"{name}.csv", index=False)
 
+precomputed_path = pathlib.Path(__file__).parent / "precomputed.json"
+meta_eval_results_path = pathlib.Path(__file__).parent / "meta_eval" / "results.json"
+
 config = {
     "real_data": str(data_dir / "real.csv"),
     "synthetic_datasets": [
@@ -211,6 +214,8 @@ config = {
         "diagnosis": "categorical",
         "smoker": "categorical",
     },
+    "precomputed_results": str(precomputed_path),
+    "meta_eval_results": str(meta_eval_results_path),
 }
 
 config_path = pathlib.Path(__file__).parent / "example_config.yaml"
@@ -277,3 +282,46 @@ for rank, (name, s) in enumerate(ranked, 1):
 print()
 print("Done. Launch the dashboard for interactive exploration:")
 print("  streamlit run run_dashboard.py")
+
+# ---------------------------------------------------------------------------
+# 14. Write meta-evaluation config
+# ---------------------------------------------------------------------------
+
+meta_eval_dir = pathlib.Path(__file__).parent / "meta_eval"
+meta_eval_noisy_dir = meta_eval_dir / "noisy"
+meta_eval_results_path = meta_eval_dir / "results.json"
+
+meta_eval_config = {
+    "input_data": str(data_dir / "real.csv"),
+    "output_dir": str(meta_eval_noisy_dir),
+    "results_path": str(meta_eval_results_path),
+    "scenarios": [
+        {"name": "fidelity_1", "n_datasets": 10},
+        {"name": "fidelity_2", "n_datasets": 10},
+        {"name": "fidelity_3", "n_datasets": 10},
+        {"name": "fidelity_4", "n_datasets": 10},
+        {"name": "fidelity_5", "n_datasets": 10},
+        {"name": "missingness_1", "n_datasets": 10},
+        {"name": "missingness_2", "n_datasets": 10},
+        {"name": "missingness_3", "n_datasets": 10},
+        {"name": "missingness_4", "n_datasets": 10},
+        {"name": "missingness_5", "n_datasets": 10},
+    ],
+    "column_types": {
+        "age": "numerical",
+        "bmi": "numerical",
+        "sbp": "numerical",
+        "sex": "categorical",
+        "diagnosis": "categorical",
+        "smoker": "categorical",
+    },
+    "axes": ["fidelity", "missingness"],
+    "random_seed": 42,
+}
+
+meta_eval_config_path = pathlib.Path(__file__).parent / "meta_eval_config.yaml"
+with open(meta_eval_config_path, "w") as f:
+    yaml.dump(meta_eval_config, f, default_flow_style=False, sort_keys=False)
+
+print(f"Saved meta-eval config to  {meta_eval_config_path}")
+print(f"Run meta-evaluation:       stdg-eval meta-eval --config {meta_eval_config_path}")
