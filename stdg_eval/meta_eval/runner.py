@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import warnings
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -30,7 +30,7 @@ from stdg_eval.meta_eval.scenarios import SCENARIO_REGISTRY
 from stdg_eval.utils.data_utils import detect_column_types
 
 
-def run_meta_eval(config: MetaEvalConfig, verbose: bool = True) -> Dict:
+def run_meta_eval(config: MetaEvalConfig, verbose: Optional[bool] = None) -> Dict:
     """
     Run a full meta-evaluation as described in *config*.
 
@@ -66,6 +66,7 @@ def run_meta_eval(config: MetaEvalConfig, verbose: bool = True) -> Dict:
               ...
             }
     """
+    verbose = config.verbose if verbose is None else verbose
     real = pd.read_csv(config.input_data)
     col_types = detect_column_types(real, override=config.column_types)
 
@@ -86,6 +87,14 @@ def run_meta_eval(config: MetaEvalConfig, verbose: bool = True) -> Dict:
             print(f"\n{'='*60}")
             print(f"Scenario: {name}  ({scenario_cfg.n_datasets} datasets)")
             print(f"{'='*60}")
+            axes_str = ", ".join(config.axes)
+            print(f"  Axes       : {axes_str}")
+            if run_fidelity:
+                print(f"  Fidelity   : wasserstein, tvd, hellinger, spearman, "
+                      f"contingency, pcd, auc_roc, propensity_mse")
+            if run_missingness:
+                print(f"  Missingness: rate, set_distribution, missing_auroc, "
+                      f"dependency_structure")
 
         # ------------------------------------------------------------------
         # 1. Generate noisy datasets
@@ -117,17 +126,20 @@ def run_meta_eval(config: MetaEvalConfig, verbose: bool = True) -> Dict:
             synth = pd.read_csv(path)
             row: Dict = {"path": path}
 
+            if verbose:
+                print(f"\n  [{i+1:>{len(str(len(paths)))}}/{len(paths)}] {Path(path).name}", flush=True)
+
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
 
                 if run_fidelity:
-                    fid = evaluate_fidelity(real, synth, col_types=col_types, verbose=False)
+                    fid = evaluate_fidelity(real, synth, col_types=col_types, verbose=verbose)
                     f_scores = compute_fidelity_score(fid)
                 else:
                     f_scores = {}
 
                 if run_missingness:
-                    miss = evaluate_missingness(real, synth, col_types=col_types, verbose=False)
+                    miss = evaluate_missingness(real, synth, col_types=col_types, verbose=verbose)
                     m_scores = compute_missingness_score(miss)
                 else:
                     m_scores = {}
@@ -158,7 +170,7 @@ def run_meta_eval(config: MetaEvalConfig, verbose: bool = True) -> Dict:
                     parts.append(f"missingness={m_scores['overall']:.4f}")
                 if comp.get("composite") is not None:
                     parts.append(f"composite={comp['composite']:.4f}")
-                print(f"  [{i+1:>{len(str(len(paths)))}}/{len(paths)}] {Path(path).name}  {', '.join(parts)}")
+                print(f"    → {', '.join(parts)}", flush=True)
 
         # ------------------------------------------------------------------
         # 3. Aggregate
@@ -183,7 +195,15 @@ def run_meta_eval(config: MetaEvalConfig, verbose: bool = True) -> Dict:
 
         all_results[name] = scenario_result
 
+        # Checkpoint: write results so far so progress isn't lost on interruption
+        if config.results_path:
+            save_meta_eval_results(all_results, config.results_path)
+
         if verbose:
+            n_done = list(all_results.keys())
+            n_total = len(config.scenarios)
+            print(f"\n  ✓ Checkpoint: {len(n_done)}/{n_total} scenarios complete "
+                  f"— results written to {config.results_path}")
             print(f"\n  Summary for {name}:")
             if "fidelity" in scenario_result:
                 ov = scenario_result["fidelity"].get("overall", {})

@@ -63,6 +63,8 @@ class MetaEvalConfig:
     """Evaluation axes to run (``"fidelity"`` and/or ``"missingness"``)."""
     random_seed: int = 42
     """Base random seed passed to all scenario functions."""
+    verbose: bool = True
+    """Print per-metric progress to stdout during evaluation."""
 
 
 def load_meta_eval_config(path: str | Path) -> MetaEvalConfig:
@@ -87,4 +89,5 @@ def load_meta_eval_config(path: str | Path) -> MetaEvalConfig:
         column_types=raw.get("column_types") or None,
         axes=raw.get("axes", ["fidelity", "missingness"]),
         random_seed=int(raw.get("random_seed", 42)),
+        verbose=bool(raw.get("verbose", True)),
     )

@@ -21,6 +21,9 @@ results_path: meta_eval/results.json
 # seed random_seed + i, so results are fully reproducible.
 random_seed: 42
 
+# Optional: print per-metric progress to terminal during evaluation (default: true)
+verbose: true
+
 # Optional: evaluation axes to run (default: both)
 axes:
   - fidelity
