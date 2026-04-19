@@ -1,0 +1,56 @@
+# stdg-eval dashboard configuration
+# -----------------------------------------------------------
+# Launch the dashboard with this config:
+#   stdg-eval dashboard --config configs/example_config.yaml
+# or:
+#   streamlit run run_dashboard.py -- --config configs/example_config.yaml
+
+# Path to the real (ground-truth) dataset CSV
+real_data: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/data/mimiciv_ed/mimiciv_ed_merged.csv
+
+# One entry per synthetic dataset to evaluate
+synthetic_datasets:
+  - name: synth_ideal
+    path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/data/mimiciv_ed/mimiciv_ed_merged.csv
+
+# Optional: override automatic column type inference.
+# Supported types: numerical, categorical
+# column_types:
+#   age: numerical
+#   bmi: numerical
+#   sbp: numerical
+#   sex: categorical
+#   diagnosis: categorical
+#   smoker: categorical
+
+# Optional: enable or disable individual metrics (all default to true if omitted)
+# metrics:
+#   # Univariate fidelity
+#   wasserstein: true          # Wasserstein distance (numerical columns)
+#   tvd: true                  # Total variation distance (categorical columns)
+#   hellinger: true            # Hellinger distance (all columns)
+#   # Bivariate fidelity
+#   spearman: true             # Spearman correlation (numerical pairs)
+#   contingency: true          # Contingency TVD (categorical / mixed pairs)
+#   pairwise_correlation_difference: true  # Phi-k correlation difference (all pairs)
+#   # Multivariate fidelity
+#   auc_roc: true              # Classifier AUC-ROC (distinguishability)
+#   propensity_mse: true       # Propensity score MSE
+#   crcl_rs: true              # Cross-classification real→synth
+#   crcl_sr: true              # Cross-classification synth→real
+#   # Missingness
+#   rate: true                 # Per-variable missingness rates
+#   set_distribution: true     # Missingness pattern distribution TVD
+#   missing_auroc: true        # Classifier AUROC on missingness indicator
+#   dependency_structure: true # Missingness dependency (phi-correlation) structure
+
+# Optional: path to precomputed results (JSON).
+# Generate with:  stdg-eval precompute --config configs/example_config.yaml --output precomputed.json
+# When present, the dashboard loads these results directly and skips recomputing
+# expensive metrics (bivariate, multivariate).
+precomputed_results: mimic_precomputed.json
+
+# Optional: path to meta-evaluation results (JSON).
+# Generate with:  stdg-eval meta-eval --config configs/example_meta_eval_config.yaml
+# When present, populates the Meta-evaluation tab in the dashboard.
+meta_eval_results: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/data/mimiciv_ed/meta_eval/results.json
