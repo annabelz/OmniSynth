@@ -1071,3 +1071,426 @@ def plot_meta_eval_summary(
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     return fig
+
+
+def plot_meta_eval_scenario_grouped(
+    base_scenario: str,
+    size_results: Dict,
+    score_keys: List[str],
+    score_labels: Dict[str, str],
+) -> go.Figure:
+    """
+    Per-scenario plot that overlays all sample sizes on a single figure.
+
+    X-axis  — score labels (fidelity overall, missingness overall, composite).
+    Color   — evaluation axis (score key); one color per key, dynamic palette.
+    Shape   — sample size; one shape per size, dynamic palette.
+
+    Individual replicate dots are shown small and semi-transparent.  The mean
+    ± std is shown as a larger marker with an error bar.  The legend is placed
+    to the right and split into **Axis** (colors) and **Sample size** (shapes)
+    sections via invisible dummy traces.
+
+    Parameters
+    ----------
+    base_scenario : str
+        Base scenario name used in the chart title (e.g. ``"fidelity_1"``).
+    size_results : dict
+        Mapping ``{size_label: per_dataset_list}`` where *size_label* is an int
+        or ``None`` (full dataset) and *per_dataset_list* is the ``per_dataset``
+        list from the results dict.
+    score_keys : list of str
+        Score keys to plot.
+    score_labels : dict
+        Mapping from score key to display label.
+    """
+    _all_colors = [
+        REAL_COLOR, SYNTH_COLORS[0], SYNTH_COLORS[2], SYNTH_COLORS[1],
+        SYNTH_COLORS[3], SYNTH_COLORS[4], "#795548", "#607D8B",
+    ]
+    _all_symbols = [
+        "circle", "square", "diamond", "triangle-up", "star",
+        "cross", "hexagon", "pentagon", "triangle-down", "bowtie",
+    ]
+
+    all_sizes = sorted(size_results.keys(), key=lambda s: (s is None, s or 0))
+    size_label_map = {s: ("full" if s is None else f"n={s:,}") for s in all_sizes}
+    score_color = {sk: _all_colors[i % len(_all_colors)] for i, sk in enumerate(score_keys)}
+    size_symbol  = {sz: _all_symbols[i % len(_all_symbols)] for i, sz in enumerate(all_sizes)}
+
+    n_sizes = len(all_sizes)
+    jitters = np.linspace(-0.25, 0.25, n_sizes) if n_sizes > 1 else [0.0]
+    size_jitter = {sz: jitters[i] for i, sz in enumerate(all_sizes)}
+
+    # x positions: one per score key
+    x_labels = [score_labels.get(sk, sk) for sk in score_keys]
+    x_pos = {sk: i for i, sk in enumerate(score_keys)}
+
+    fig = go.Figure()
+
+    # --- Legend section headers and dummy color/shape entries ----------------
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="markers",
+        marker=dict(color="rgba(0,0,0,0)", size=0),
+        name="<b>Axis</b>", showlegend=True,
+        legendgroup="hdr_axis", hoverinfo="skip",
+    ))
+    for sk in score_keys:
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker=dict(color=score_color[sk], size=10, symbol="circle"),
+            name=score_labels.get(sk, sk), showlegend=True,
+            legendgroup=f"axis_{sk}", hoverinfo="skip",
+        ))
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="markers",
+        marker=dict(color="rgba(0,0,0,0)", size=0),
+        name="<b>Sample size</b>", showlegend=True,
+        legendgroup="hdr_size", hoverinfo="skip",
+    ))
+    for sz in all_sizes:
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker=dict(color="grey", size=10, symbol=size_symbol[sz]),
+            name=size_label_map[sz], showlegend=True,
+            legendgroup=f"size_{sz}", hoverinfo="skip",
+        ))
+
+    # --- Data traces ---------------------------------------------------------
+    for sz in all_sizes:
+        per_ds = size_results[sz]
+        symbol = size_symbol[sz]
+        for sk in score_keys:
+            color = score_color[sk]
+            vals = [row[sk] for row in per_ds if sk in row]
+            if not vals:
+                continue
+            arr = np.array(vals)
+            mean, std = float(np.mean(arr)), float(np.std(arr))
+            xi = x_pos[sk] + size_jitter[sz]
+
+            # Individual replicate dots
+            fig.add_trace(go.Scatter(
+                x=[xi] * len(vals), y=list(arr),
+                mode="markers",
+                marker=dict(color=color, size=6, symbol=symbol, opacity=0.35),
+                showlegend=False, hoverinfo="skip",
+            ))
+            # Mean ± std
+            fig.add_trace(go.Scatter(
+                x=[xi], y=[mean],
+                mode="markers",
+                marker=dict(color=color, size=12, symbol=symbol,
+                            line=dict(width=1, color="white")),
+                error_y=dict(type="data", array=[std], visible=True, color=color),
+                showlegend=False,
+                text=[f"{score_labels.get(sk, sk)} | {size_label_map[sz]}<br>"
+                      f"mean={mean:.4f}  std={std:.4f}"],
+                hovertemplate="%{text}<extra></extra>",
+            ))
+
+    fig.update_layout(
+        title=base_scenario,
+        xaxis=dict(
+            tickvals=list(x_pos.values()),
+            ticktext=x_labels,
+            range=[-0.6, len(score_keys) - 0.4],
+        ),
+        yaxis=dict(range=[0, 1], title="Score"),
+        height=380,
+        margin=dict(l=40, r=180, t=50, b=60),
+        legend=dict(orientation="v", x=1.02, y=1, xanchor="left", yanchor="top"),
+    )
+    return fig
+
+
+def plot_meta_eval_summary_grouped(
+    results: Dict,
+    score_keys: List[str],
+    score_labels: Dict[str, str],
+) -> go.Figure:
+    """
+    Summary plot for results that include sample-size suffixes.
+
+    Groups result keys by their base scenario name and plots all sample sizes
+    at the same x position.  **Color** encodes evaluation axis (score type);
+    **marker shape** encodes sample size.  Both dimensions are dynamic —
+    new colors are assigned for additional score keys, new shapes for additional
+    sample sizes.  The legend is placed to the right and split into two sections
+    (Axis / Sample size) using invisible dummy traces as section headers.
+
+    Keys without a sample-size suffix (plain ``{scenario}`` keys) are treated
+    as "full" and plotted alongside the suffixed ones.
+    """
+    import re
+
+    # Expanded color palette — one per score key, dynamically extended
+    _all_colors = [
+        REAL_COLOR,       # blue
+        SYNTH_COLORS[0],  # pink
+        SYNTH_COLORS[2],  # orange
+        SYNTH_COLORS[1],  # green
+        SYNTH_COLORS[3],  # purple
+        SYNTH_COLORS[4],  # cyan
+        "#795548",        # brown
+        "#607D8B",        # blue-grey
+    ]
+    # Expanded shape palette — one per sample size, dynamically extended
+    _all_symbols = [
+        "circle", "square", "diamond", "triangle-up",
+        "star", "cross", "hexagon", "pentagon",
+        "triangle-down", "triangle-left", "triangle-right", "bowtie",
+    ]
+
+    # --- Parse result keys → (base_scenario, size) --------------------------
+    parsed: Dict[str, Dict] = {}  # base → {size → {score_key → {mean, std}}}
+    for key, data in results.items():
+        m = re.match(r"^(.+?)_n(\d+)$", key)
+        if m:
+            base, size = m.group(1), int(m.group(2))
+        elif key.endswith("_full"):
+            base, size = key[:-5], None
+        else:
+            base, size = key, None
+
+        per_ds = data.get("per_dataset", [])
+        for sk in score_keys:
+            vals = [row[sk] for row in per_ds if sk in row]
+            if not vals:
+                continue
+            arr = np.array(vals)
+            parsed.setdefault(base, {}).setdefault(size, {})[sk] = {
+                "mean": float(np.mean(arr)),
+                "std": float(np.std(arr)),
+            }
+
+    # Ordered bases (preserve result dict order)
+    bases = list(dict.fromkeys(
+        re.match(r"^(.+?)_n\d+$", k).group(1) if re.match(r"^(.+?)_n\d+$", k)
+        else (k[:-5] if k.endswith("_full") else k)
+        for k in results
+    ))
+
+    # Ordered sample sizes: integers ascending, None (full) last
+    all_sizes = sorted(
+        {sz for b in parsed.values() for sz in b},
+        key=lambda s: (s is None, s or 0),
+    )
+    size_label_map = {s: ("full" if s is None else f"n={s:,}") for s in all_sizes}
+
+    # Assign colors (per score key) and symbols (per sample size)
+    score_color = {sk: _all_colors[i % len(_all_colors)] for i, sk in enumerate(score_keys)}
+    size_symbol  = {sz: _all_symbols[i % len(_all_symbols)] for i, sz in enumerate(all_sizes)}
+
+    # Jitter so markers at same x don't overlap
+    n_sizes = len(all_sizes)
+    jitters = np.linspace(-0.3, 0.3, n_sizes) if n_sizes > 1 else [0.0]
+    size_jitter = {sz: jitters[i] for i, sz in enumerate(all_sizes)}
+
+    x_positions = {b: i for i, b in enumerate(bases)}
+
+    fig = go.Figure()
+
+    # --- Section header: "Axis" (invisible dummy, bold name in legend) -------
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="markers",
+        marker=dict(color="rgba(0,0,0,0)", size=0),
+        name="<b>Axis</b>",
+        showlegend=True,
+        legendgroup="header_axis",
+        hoverinfo="skip",
+    ))
+
+    # --- Color legend entries (one per score key) ----------------------------
+    for sk in score_keys:
+        color = score_color[sk]
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker=dict(color=color, size=10, symbol="circle"),
+            name=score_labels.get(sk, sk),
+            showlegend=True,
+            legendgroup=f"axis_{sk}",
+            hoverinfo="skip",
+        ))
+
+    # --- Section header: "Sample size" --------------------------------------
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="markers",
+        marker=dict(color="rgba(0,0,0,0)", size=0),
+        name="<b>Sample size</b>",
+        showlegend=True,
+        legendgroup="header_size",
+        hoverinfo="skip",
+    ))
+
+    # --- Shape legend entries (one per sample size) --------------------------
+    for sz in all_sizes:
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker=dict(color="grey", size=10, symbol=size_symbol[sz]),
+            name=size_label_map[sz],
+            showlegend=True,
+            legendgroup=f"size_{sz}",
+            hoverinfo="skip",
+        ))
+
+    # --- Data traces (no legend — represented by dummy entries above) --------
+    for si, size in enumerate(all_sizes):
+        symbol = size_symbol[size]
+        for sk in score_keys:
+            color = score_color[sk]
+            xs, ys, errs, texts = [], [], [], []
+            for base in bases:
+                stats = parsed.get(base, {}).get(size, {}).get(sk)
+                xs.append(x_positions[base] + size_jitter[size])
+                if stats:
+                    ys.append(stats["mean"])
+                    errs.append(stats["std"])
+                    texts.append(
+                        f"{base} | {size_label_map[size]}<br>"
+                        f"{score_labels.get(sk, sk)}<br>"
+                        f"mean={stats['mean']:.4f}  std={stats['std']:.4f}"
+                    )
+                else:
+                    ys.append(None)
+                    errs.append(None)
+                    texts.append("")
+
+            fig.add_trace(go.Scatter(
+                x=xs, y=ys,
+                mode="markers",
+                showlegend=False,
+                marker=dict(
+                    color=color, size=11, symbol=symbol,
+                    line=dict(width=1, color="white"),
+                ),
+                error_y=dict(type="data", array=errs, visible=True, color=color),
+                text=texts,
+                hovertemplate="%{text}<extra></extra>",
+            ))
+
+    n_bases = len(bases)
+    fig.update_layout(
+        title="Summary across scenarios (by sample size)",
+        xaxis=dict(
+            tickvals=list(x_positions.values()),
+            ticktext=list(x_positions.keys()),
+            tickangle=-35,
+            range=[-0.6, n_bases - 0.4],
+        ),
+        yaxis=dict(range=[0, 1], title="Score"),
+        height=420,
+        margin=dict(l=40, r=200, t=50, b=120),
+        legend=dict(
+            orientation="v",
+            x=1.02, y=1,
+            xanchor="left", yanchor="top",
+        ),
+    )
+    return fig
+
+
+def plot_meta_eval_sample_size_comparison(
+    results: Dict,
+    score_key: str,
+    score_label: str,
+) -> go.Figure:
+    """
+    Line plot showing mean score vs sample size for each base scenario.
+
+    Expects result keys in the format ``{scenario}_n{size}`` or
+    ``{scenario}_full`` (as produced when ``sample_sizes`` is set in the
+    meta-eval config).  One line per base scenario, x-axis is sample size
+    (ordered ascending, with full dataset last), y-axis is mean score with
+    ± 1 std error band.
+
+    Parameters
+    ----------
+    results : dict
+        Full meta-evaluation results dict (keyed by result key).
+    score_key : str
+        Score key to plot, e.g. ``"fidelity_overall"``.
+    score_label : str
+        Display label for the y-axis / title.
+    """
+    import re
+
+    # Parse each key into (base_scenario, sample_size) where sample_size is
+    # an int or None for "full".
+    parsed: Dict[str, Dict] = {}  # base_scenario → {size_label: {mean, std}}
+    for key, data in results.items():
+        m = re.match(r"^(.+?)_n(\d+)$", key)
+        if m:
+            base, size_label = m.group(1), int(m.group(2))
+        elif key.endswith("_full"):
+            base, size_label = key[:-5], None
+        else:
+            continue  # no sample-size suffix — skip
+
+        per_ds = data.get("per_dataset", [])
+        vals = [row[score_key] for row in per_ds if score_key in row]
+        if not vals:
+            continue
+        arr = np.array(vals)
+        parsed.setdefault(base, {})[size_label] = {
+            "mean": float(np.mean(arr)),
+            "std": float(np.std(arr)),
+        }
+
+    if not parsed:
+        fig = go.Figure()
+        fig.update_layout(
+            title=f"Sample size comparison — {score_label}",
+            annotations=[dict(text="No sample-size results found", x=0.5, y=0.5,
+                              xref="paper", yref="paper", showarrow=False)],
+            height=300,
+        )
+        return fig
+
+    # Collect all unique size labels and sort: integers ascending, None (full) last
+    all_sizes = sorted(
+        {sz for scenario_sizes in parsed.values() for sz in scenario_sizes},
+        key=lambda s: (s is None, s or 0),
+    )
+    x_labels = [str(s) if s is not None else "full" for s in all_sizes]
+
+    fig = go.Figure()
+    for i, (base, size_data) in enumerate(sorted(parsed.items())):
+        color = _synth_color(i)
+        means = [size_data.get(s, {}).get("mean") for s in all_sizes]
+        stds  = [size_data.get(s, {}).get("std", 0) for s in all_sizes]
+
+        # Shaded std band
+        y_upper = [m + s if m is not None else None for m, s in zip(means, stds)]
+        y_lower = [m - s if m is not None else None for m, s in zip(means, stds)]
+        fig.add_trace(go.Scatter(
+            x=x_labels + x_labels[::-1],
+            y=y_upper + y_lower[::-1],
+            fill="toself",
+            fillcolor=color,
+            opacity=0.12,
+            line=dict(width=0),
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+        # Mean line
+        fig.add_trace(go.Scatter(
+            x=x_labels,
+            y=means,
+            mode="lines+markers",
+            name=base,
+            line=dict(color=color, width=2),
+            marker=dict(color=color, size=8),
+            error_y=dict(type="data", array=stds, visible=True, color=color),
+            hovertemplate=f"{base}<br>n=%{{x}}<br>mean=%{{y:.4f}}<extra></extra>",
+        ))
+
+    fig.update_layout(
+        title=f"Score vs sample size — {score_label}",
+        xaxis=dict(title="Sample size", categoryorder="array", categoryarray=x_labels),
+        yaxis=dict(range=[0, 1], title="Score"),
+        height=420,
+        margin=dict(l=40, r=20, t=50, b=60),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    return fig

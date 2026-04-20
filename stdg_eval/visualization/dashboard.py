@@ -1572,6 +1572,21 @@ def _tab_dataset_description():
         })
         st.dataframe(detail, use_container_width=True, hide_index=True)
 
+    # --- Raw data preview ---
+    st.subheader("Raw data")
+    raw_selected = st.selectbox(
+        "Synthetic dataset to preview:", list(synths.keys()), key="desc_raw_selected"
+    ) if synths else None
+
+    raw_cols = st.columns(2)
+    with raw_cols[0]:
+        st.markdown("**Real dataset** (first 10 rows)")
+        st.dataframe(real.head(10), use_container_width=True)
+    with raw_cols[1]:
+        if raw_selected:
+            st.markdown(f"**{raw_selected}** (first 10 rows)")
+            st.dataframe(synths[raw_selected].head(10), use_container_width=True)
+
 
 # ===========================================================================
 # Tab 5: Ranking report (Yan et al. 2022)
@@ -1901,8 +1916,30 @@ def _tab_meta_eval():
         filtered_scenarios = all_scenarios
     filtered_meta = {s: meta[s] for s in filtered_scenarios}
     summary_keys = [k for k in ("fidelity_overall", "missingness_overall", "composite_score") if k in all_per_ds_keys]
+    import re as _re
+    has_sample_sizes = any(
+        _re.search(r"_n\d+$", k) or k.endswith("_full")
+        for k in filtered_meta
+    )
     if summary_keys and filtered_meta:
-        fig = P.plot_meta_eval_summary(filtered_meta, summary_keys, score_label_map)
+        if has_sample_sizes:
+            fig = P.plot_meta_eval_summary_grouped(filtered_meta, summary_keys, score_label_map)
+        else:
+            fig = P.plot_meta_eval_summary(filtered_meta, summary_keys, score_label_map)
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Score vs sample size line plot — only shown when sample-size results are present
+    if has_sample_sizes and summary_keys:
+        st.markdown("**Score vs sample size**")
+        size_score_key = st.selectbox(
+            "Score to compare across sample sizes",
+            summary_keys,
+            format_func=lambda k: score_label_map[k],
+            key="meta_size_score_key",
+        )
+        fig = P.plot_meta_eval_sample_size_comparison(
+            filtered_meta, size_score_key, score_label_map[size_score_key]
+        )
         st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
@@ -1927,45 +1964,86 @@ def _tab_meta_eval():
     missingness_sub_keys = [k for k in _missingness_sub_keys if k in all_per_ds_keys]
     sub_keys = fidelity_sub_keys + missingness_sub_keys
 
-    # Preserve config-file ordering (insertion order of meta dict)
-    fidelity_scenarios    = [s for s in meta if s.startswith("fidelity")]
-    missingness_scenarios = [s for s in meta if s.startswith("missingness")]
-    other_scenarios       = [s for s in meta if s not in fidelity_scenarios + missingness_scenarios]
+    # Group result keys by base scenario name when sample sizes are present
+    # base_scenario → {size (int or None) → per_dataset list}
+    base_scenario_map: Dict[str, Dict] = {}
+    for key in meta:
+        m = _re.match(r"^(.+?)_n(\d+)$", key)
+        if m:
+            base, size = m.group(1), int(m.group(2))
+        elif key.endswith("_full"):
+            base, size = key[:-5], None
+        else:
+            base, size = key, None
+        base_scenario_map.setdefault(base, {})[size] = meta[key].get("per_dataset", [])
+
+    # Preserve config-file ordering by base scenario
+    seen_bases: Dict[str, None] = {}
+    for key in meta:
+        m = _re.match(r"^(.+?)_n(\d+)$", key)
+        if m:
+            base = m.group(1)
+        elif key.endswith("_full"):
+            base = key[:-5]
+        else:
+            base = key
+        seen_bases[base] = None
+    ordered_bases = list(seen_bases.keys())
+
+    fidelity_bases    = [b for b in ordered_bases if b.startswith("fidelity")]
+    missingness_bases = [b for b in ordered_bases if b.startswith("missingness")]
+    other_bases       = [b for b in ordered_bases if b not in fidelity_bases + missingness_bases]
 
     for group_label, group in [
-        ("Fidelity scenarios",    fidelity_scenarios),
-        ("Missingness scenarios",  missingness_scenarios),
-        ("Other scenarios",        other_scenarios),
+        ("Fidelity scenarios",    fidelity_bases),
+        ("Missingness scenarios",  missingness_bases),
+        ("Other scenarios",        other_bases),
     ]:
         if not group:
             continue
         st.markdown(f"**{group_label}**")
         cols = st.columns(min(len(group), 3))
-        for i, scenario in enumerate(group):
-            per_ds = meta[scenario].get("per_dataset", [])
-            n = meta[scenario].get("n_datasets", len(per_ds))
+        for i, base in enumerate(group):
+            size_results = base_scenario_map[base]
             with cols[i % 3]:
-                fig = P.plot_meta_eval_scenario(
-                    scenario_name=f"{scenario}  (n={n})",
-                    per_dataset=per_ds,
-                    score_keys=plot_keys,
-                    score_labels=score_label_map,
-                )
+                if has_sample_sizes and len(size_results) > 1:
+                    fig = P.plot_meta_eval_scenario_grouped(
+                        base_scenario=base,
+                        size_results=size_results,
+                        score_keys=plot_keys,
+                        score_labels=score_label_map,
+                    )
+                else:
+                    # Single size — use original flat plot
+                    per_ds = next(iter(size_results.values()))
+                    n = len(per_ds)
+                    fig = P.plot_meta_eval_scenario(
+                        scenario_name=f"{base}  (n={n})",
+                        per_dataset=per_ds,
+                        score_keys=plot_keys,
+                        score_labels=score_label_map,
+                    )
                 st.plotly_chart(fig, use_container_width=True)
-                # Sub-metric score table
-                present_sub = [k for k in sub_keys if any(k in row for row in per_ds)]
+
+                # Sub-metric table — one row per (metric, sample size)
+                all_per_ds = [row for pd_list in size_results.values() for row in pd_list]
+                present_sub = [k for k in sub_keys if any(k in row for row in all_per_ds)]
                 if present_sub:
                     table_rows = []
-                    for k in present_sub:
-                        vals = [row[k] for row in per_ds if k in row]
-                        if not vals:
-                            continue
-                        arr = np.array(vals)
-                        table_rows.append({
-                            "Metric": score_label_map.get(k, k),
-                            "Mean": f"{float(np.mean(arr)):.4f}",
-                            "Std": f"{float(np.std(arr)):.4f}",
-                        })
+                    for sz, per_ds in sorted(size_results.items(),
+                                             key=lambda x: (x[0] is None, x[0] or 0)):
+                        size_tag = "full" if sz is None else f"n={sz:,}"
+                        for k in present_sub:
+                            vals = [row[k] for row in per_ds if k in row]
+                            if not vals:
+                                continue
+                            arr = np.array(vals)
+                            table_rows.append({
+                                "Metric": score_label_map.get(k, k),
+                                "Sample size": size_tag,
+                                "Mean": f"{float(np.mean(arr)):.4f}",
+                                "Std": f"{float(np.std(arr)):.4f}",
+                            })
                     if table_rows:
                         st.dataframe(
                             pd.DataFrame(table_rows),

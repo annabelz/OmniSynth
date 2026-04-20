@@ -11,6 +11,7 @@ Orchestrates the full meta-evaluation pipeline:
 from __future__ import annotations
 
 import json
+import time
 import warnings
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -66,6 +67,17 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[str] = None) -> Dict
 
     all_results: Dict = {}
 
+    # When sample_sizes is not specified, use a single sentinel (None = full dataset)
+    # and keep the old result key format ({scenario_name}) for backwards compatibility.
+    use_sample_sizes = config.sample_sizes is not None
+    effective_sample_sizes: List[Optional[int]] = config.sample_sizes if use_sample_sizes else [None]
+
+    def _stats(values: List[float]) -> Dict[str, float]:
+        arr = np.array(values)
+        return {"mean": float(np.mean(arr)), "std": float(np.std(arr))}
+
+    total_runs = len(config.scenarios) * len(effective_sample_sizes)
+
     for scenario_cfg in config.scenarios:
         name = scenario_cfg.name
         if name not in SCENARIO_REGISTRY:
@@ -73,140 +85,179 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[str] = None) -> Dict
                 f"Unknown scenario {name!r}. "
                 f"Available: {sorted(SCENARIO_REGISTRY.keys())}"
             )
-
-        if show_some:
-            print(f"\n{'='*60}")
-            print(f"Scenario: {name}  ({scenario_cfg.n_datasets} datasets)")
-            print(f"{'='*60}")
-            axes_str = ", ".join(config.axes)
-            print(f"  Axes       : {axes_str}")
-            if run_fidelity:
-                print(f"  Fidelity   : wasserstein, tvd, hellinger, spearman, "
-                      f"contingency, pcd, auc_roc, propensity_mse")
-            if run_missingness:
-                print(f"  Missingness: rate, set_distribution, missing_auroc, "
-                      f"dependency_structure")
-
-        # ------------------------------------------------------------------
-        # 1. Generate noisy datasets
-        # ------------------------------------------------------------------
-        scenario_dir = Path(config.output_dir) / name
         scenario_fn = SCENARIO_REGISTRY[name]
-        paths = scenario_fn(
-            df=real,
-            n_datasets=scenario_cfg.n_datasets,
-            output_dir=scenario_dir,
-            col_types=col_types,
-            prefix=name,
-            random_seed=config.random_seed,
-            verbose=show_all,
-            **scenario_cfg.params,
-        )
 
-        if show_some:
-            print(f"  Generated {len(paths)} datasets in {scenario_dir}")
+        for sample_size in effective_sample_sizes:
+            # Result key: plain name for backwards compat; suffixed when sample_sizes used
+            if not use_sample_sizes:
+                result_key = name
+            else:
+                size_tag = "full" if sample_size is None else f"n{sample_size}"
+                result_key = f"{name}_{size_tag}"
 
-        # ------------------------------------------------------------------
-        # 2. Evaluate each dataset
-        # ------------------------------------------------------------------
-        per_dataset: List[Dict] = []
-        fid_score_lists: Dict[str, List[float]] = {}
-        miss_score_lists: Dict[str, List[float]] = {}
-        composite_list: List[float] = []
-
-        for i, path in enumerate(paths):
-            synth = pd.read_csv(path)
-            row: Dict = {"path": path}
-
-            if show_all:
-                print(f"\n  [{i+1:>{len(str(len(paths)))}}/{len(paths)}] {Path(path).name}", flush=True)
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-
-                if run_fidelity:
-                    fid = evaluate_fidelity(real, synth, col_types=col_types, verbose=show_all)
-                    f_scores = compute_fidelity_score(fid)
-                else:
-                    f_scores = {}
-
-                if run_missingness:
-                    miss = evaluate_missingness(real, synth, col_types=col_types, verbose=show_all)
-                    m_scores = compute_missingness_score(miss)
-                else:
-                    m_scores = {}
-
-                comp = compute_composite_score(f_scores, m_scores) if (f_scores or m_scores) else {}
-
-            for k, v in f_scores.items():
-                if isinstance(v, float):
-                    fid_score_lists.setdefault(k, []).append(v)
-                    row[f"fidelity_{k}"] = v
-
-            for k, v in m_scores.items():
-                if isinstance(v, float):
-                    miss_score_lists.setdefault(k, []).append(v)
-                    row[f"missingness_{k}"] = v
-
-            if comp.get("composite") is not None:
-                composite_list.append(comp["composite"])
-                row["composite_score"] = comp["composite"]
-
-            per_dataset.append(row)
+            size_str = "full dataset" if sample_size is None else f"n={sample_size:,}"
 
             if show_some:
-                parts = []
-                if "overall" in f_scores:
-                    parts.append(f"fidelity={f_scores['overall']:.4f}")
-                if "overall" in m_scores:
-                    parts.append(f"missingness={m_scores['overall']:.4f}")
+                print(f"\n{'='*60}")
+                if use_sample_sizes:
+                    print(f"Scenario: {name}  |  Sample size: {size_str}  ({scenario_cfg.n_datasets} replicates)")
+                else:
+                    print(f"Scenario: {name}  ({scenario_cfg.n_datasets} datasets)")
+                print(f"{'='*60}")
+                axes_str = ", ".join(config.axes)
+                print(f"  Axes       : {axes_str}")
+                if run_fidelity:
+                    print(f"  Fidelity   : wasserstein, tvd, hellinger, spearman, "
+                          f"contingency, pcd, auc_roc, propensity_mse")
+                if run_missingness:
+                    print(f"  Missingness: rate, set_distribution, missing_auroc, "
+                          f"dependency_structure")
+
+            # ------------------------------------------------------------------
+            # 1. Generate noisy datasets
+            # ------------------------------------------------------------------
+            scenario_dir = Path(config.output_dir) / result_key
+
+            if not use_sample_sizes or sample_size is None:
+                # Bulk generation: generate all replicates at once from full real data
+                paths = scenario_fn(
+                    df=real,
+                    n_datasets=scenario_cfg.n_datasets,
+                    output_dir=scenario_dir,
+                    col_types=col_types,
+                    prefix=name,
+                    random_seed=config.random_seed,
+                    **scenario_cfg.params,
+                )
+                # Each replicate evaluates against the full real dataset
+                eval_pairs: List[tuple] = [(p, real) for p in paths]
+
+                if show_some:
+                    print(f"  Generated {len(paths)} datasets in {scenario_dir}")
+            else:
+                # Per-replicate sampling: draw a fresh random sample for each replicate,
+                # generate one noisy dataset from it, evaluate against that same sample.
+                eval_pairs = []
+                for i in range(scenario_cfg.n_datasets):
+                    n = min(sample_size, len(real))
+                    real_sample = real.sample(n=n, random_state=config.random_seed + i).reset_index(drop=True)
+                    rep_dir = scenario_dir / f"rep_{i:03d}"
+                    rep_paths = scenario_fn(
+                        df=real_sample,
+                        n_datasets=1,
+                        output_dir=rep_dir,
+                        col_types=col_types,
+                        prefix=name,
+                        random_seed=config.random_seed + i,
+                        **scenario_cfg.params,
+                    )
+                    eval_pairs.append((rep_paths[0], real_sample))
+
+                if show_some:
+                    print(f"  Generated {len(eval_pairs)} replicates ({size_str} each) in {scenario_dir}")
+
+            # ------------------------------------------------------------------
+            # 2. Evaluate each dataset
+            # ------------------------------------------------------------------
+            per_dataset: List[Dict] = []
+            fid_score_lists: Dict[str, List[float]] = {}
+            miss_score_lists: Dict[str, List[float]] = {}
+            composite_list: List[float] = []
+
+            n_total_pairs = len(eval_pairs)
+            for i, (path, real_ref) in enumerate(eval_pairs):
+                synth = pd.read_csv(path)
+                row: Dict = {"path": str(path), "sample_size": sample_size}
+
+                if show_all:
+                    print(f"\n  [{i+1:>{len(str(n_total_pairs))}}/{n_total_pairs}] {Path(path).name}", flush=True)
+
+                t0 = time.monotonic()
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+
+                    if run_fidelity:
+                        fid = evaluate_fidelity(real_ref, synth, col_types=col_types, verbose=show_all)
+                        f_scores = compute_fidelity_score(fid)
+                    else:
+                        f_scores = {}
+
+                    if run_missingness:
+                        miss = evaluate_missingness(real_ref, synth, col_types=col_types, verbose=show_all)
+                        m_scores = compute_missingness_score(miss)
+                    else:
+                        m_scores = {}
+
+                    comp = compute_composite_score(f_scores, m_scores) if (f_scores or m_scores) else {}
+                elapsed = time.monotonic() - t0
+
+                for k, v in f_scores.items():
+                    if isinstance(v, float):
+                        fid_score_lists.setdefault(k, []).append(v)
+                        row[f"fidelity_{k}"] = v
+
+                for k, v in m_scores.items():
+                    if isinstance(v, float):
+                        miss_score_lists.setdefault(k, []).append(v)
+                        row[f"missingness_{k}"] = v
+
                 if comp.get("composite") is not None:
-                    parts.append(f"composite={comp['composite']:.4f}")
-                print(f"  [{i+1:>{len(str(len(paths)))}}/{len(paths)}] → {', '.join(parts)}", flush=True)
+                    composite_list.append(comp["composite"])
+                    row["composite_score"] = comp["composite"]
 
-        # ------------------------------------------------------------------
-        # 3. Aggregate
-        # ------------------------------------------------------------------
-        def _stats(values: List[float]) -> Dict[str, float]:
-            arr = np.array(values)
-            return {"mean": float(np.mean(arr)), "std": float(np.std(arr))}
+                row["elapsed_s"] = round(elapsed, 2)
+                per_dataset.append(row)
 
-        scenario_result: Dict = {
-            "n_datasets": len(paths),
-            "per_dataset": per_dataset,
-        }
+                if show_some:
+                    parts = []
+                    if "overall" in f_scores:
+                        parts.append(f"fidelity={f_scores['overall']:.4f}")
+                    if "overall" in m_scores:
+                        parts.append(f"missingness={m_scores['overall']:.4f}")
+                    if comp.get("composite") is not None:
+                        parts.append(f"composite={comp['composite']:.4f}")
+                    parts.append(f"time={elapsed:.1f}s")
+                    print(f"  [{i+1:>{len(str(n_total_pairs))}}/{n_total_pairs}] → {', '.join(parts)}", flush=True)
 
-        if fid_score_lists:
-            scenario_result["fidelity"] = {k: _stats(v) for k, v in fid_score_lists.items()}
+            # ------------------------------------------------------------------
+            # 3. Aggregate
+            # ------------------------------------------------------------------
+            scenario_result: Dict = {
+                "n_datasets": len(eval_pairs),
+                "sample_size": sample_size,
+                "per_dataset": per_dataset,
+            }
 
-        if miss_score_lists:
-            scenario_result["missingness"] = {k: _stats(v) for k, v in miss_score_lists.items()}
+            if fid_score_lists:
+                scenario_result["fidelity"] = {k: _stats(v) for k, v in fid_score_lists.items()}
 
-        if composite_list:
-            scenario_result["composite"] = _stats(composite_list)
+            if miss_score_lists:
+                scenario_result["missingness"] = {k: _stats(v) for k, v in miss_score_lists.items()}
 
-        all_results[name] = scenario_result
+            if composite_list:
+                scenario_result["composite"] = _stats(composite_list)
 
-        if config.results_path:
-            save_meta_eval_results(all_results, config.results_path)
+            all_results[result_key] = scenario_result
 
-        if show_some:
-            n_done = list(all_results.keys())
-            n_total = len(config.scenarios)
-            print(f"\n  ✓ Checkpoint: {len(n_done)}/{n_total} scenarios complete "
-                  f"— results written to {config.results_path}")
-            print(f"\n  Summary for {name}:")
-            if "fidelity" in scenario_result:
-                ov = scenario_result["fidelity"].get("overall", {})
-                print(f"    fidelity overall  mean={ov.get('mean', float('nan')):.4f}  "
-                      f"std={ov.get('std', float('nan')):.4f}")
-            if "missingness" in scenario_result:
-                ov = scenario_result["missingness"].get("overall", {})
-                print(f"    missingness overall  mean={ov.get('mean', float('nan')):.4f}  "
-                      f"std={ov.get('std', float('nan')):.4f}")
-            if "composite" in scenario_result:
-                ov = scenario_result["composite"]
-                print(f"    composite  mean={ov['mean']:.4f}  std={ov['std']:.4f}")
+            if config.results_path:
+                save_meta_eval_results(all_results, config.results_path)
+
+            if show_some:
+                n_done = len(all_results)
+                print(f"\n  ✓ Checkpoint: {n_done}/{total_runs} runs complete "
+                      f"— results written to {config.results_path}")
+                print(f"\n  Summary for {result_key}:")
+                if "fidelity" in scenario_result:
+                    ov = scenario_result["fidelity"].get("overall", {})
+                    print(f"    fidelity overall  mean={ov.get('mean', float('nan')):.4f}  "
+                          f"std={ov.get('std', float('nan')):.4f}")
+                if "missingness" in scenario_result:
+                    ov = scenario_result["missingness"].get("overall", {})
+                    print(f"    missingness overall  mean={ov.get('mean', float('nan')):.4f}  "
+                          f"std={ov.get('std', float('nan')):.4f}")
+                if "composite" in scenario_result:
+                    ov = scenario_result["composite"]
+                    print(f"    composite  mean={ov['mean']:.4f}  std={ov['std']:.4f}")
 
     return all_results
 
