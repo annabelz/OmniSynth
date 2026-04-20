@@ -30,7 +30,11 @@ from stdg_eval.meta_eval.scenarios import SCENARIO_REGISTRY
 from stdg_eval.utils.data_utils import detect_column_types
 
 
-def run_meta_eval(config: MetaEvalConfig, verbose: Optional[str] = None) -> Dict:
+def run_meta_eval(
+    config: MetaEvalConfig,
+    verbose: Optional[str] = None,
+    skip_generation: bool = False,
+) -> Dict:
     """
     Run a full meta-evaluation as described in *config*.
 
@@ -45,6 +49,9 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[str] = None) -> Dict
           and final summaries.
         - ``"all"``  — everything in ``"some"`` plus per-dataset generation
           progress and per-metric prints.
+    skip_generation : bool
+        If ``True``, skip dataset generation and evaluate pre-existing CSV files
+        found in ``output_dir/<scenario_name>/``.  Raises if no files are found.
 
     Returns
     -------
@@ -68,11 +75,6 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[str] = None) -> Dict
 
     for scenario_cfg in config.scenarios:
         name = scenario_cfg.name
-        if name not in SCENARIO_REGISTRY:
-            raise ValueError(
-                f"Unknown scenario {name!r}. "
-                f"Available: {sorted(SCENARIO_REGISTRY.keys())}"
-            )
 
         if show_some:
             print(f"\n{'='*60}")
@@ -88,23 +90,37 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[str] = None) -> Dict
                       f"dependency_structure")
 
         # ------------------------------------------------------------------
-        # 1. Generate noisy datasets
+        # 1. Generate or discover noisy datasets
         # ------------------------------------------------------------------
         scenario_dir = Path(config.output_dir) / name
-        scenario_fn = SCENARIO_REGISTRY[name]
-        paths = scenario_fn(
-            df=real,
-            n_datasets=scenario_cfg.n_datasets,
-            output_dir=scenario_dir,
-            col_types=col_types,
-            prefix=name,
-            random_seed=config.random_seed,
-            verbose=show_all,
-            **scenario_cfg.params,
-        )
 
-        if show_some:
-            print(f"  Generated {len(paths)} datasets in {scenario_dir}")
+        if skip_generation:
+            paths = sorted(str(p) for p in scenario_dir.glob("*.csv"))
+            if not paths:
+                raise FileNotFoundError(
+                    f"--eval-only specified but no CSV files found in {scenario_dir}"
+                )
+            if show_some:
+                print(f"  Found {len(paths)} existing datasets in {scenario_dir}")
+        else:
+            if name not in SCENARIO_REGISTRY:
+                raise ValueError(
+                    f"Unknown scenario {name!r}. "
+                    f"Available: {sorted(SCENARIO_REGISTRY.keys())}"
+                )
+            scenario_fn = SCENARIO_REGISTRY[name]
+            paths = scenario_fn(
+                df=real,
+                n_datasets=scenario_cfg.n_datasets,
+                output_dir=scenario_dir,
+                col_types=col_types,
+                prefix=name,
+                random_seed=config.random_seed,
+                verbose=show_all,
+                **scenario_cfg.params,
+            )
+            if show_some:
+                print(f"  Generated {len(paths)} datasets in {scenario_dir}")
 
         # ------------------------------------------------------------------
         # 2. Evaluate each dataset

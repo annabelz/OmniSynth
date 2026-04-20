@@ -177,7 +177,7 @@ def _cmd_meta_eval(args):
     from stdg_eval.meta_eval.runner import run_meta_eval, save_meta_eval_results
 
     cfg = load_meta_eval_config(args.config)
-    results = run_meta_eval(cfg)
+    results = run_meta_eval(cfg, skip_generation=args.eval_only)
 
     out = Path(cfg.results_path)
     save_meta_eval_results(results, out)
@@ -232,6 +232,11 @@ def main():
     meta_p.add_argument(
         "--config", type=Path, required=True,
         help="Path to a meta-evaluation YAML config file.",
+    )
+    meta_p.add_argument(
+        "--eval-only", action="store_true",
+        help="Skip dataset generation and evaluate pre-existing noisy datasets "
+             "found in output_dir/<scenario_name>/.",
     )
 
     args = parser.parse_args()
