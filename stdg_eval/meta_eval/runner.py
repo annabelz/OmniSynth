@@ -31,7 +31,11 @@ from stdg_eval.meta_eval.scenarios import SCENARIO_REGISTRY
 from stdg_eval.utils.data_utils import detect_column_types
 
 
-def run_meta_eval(config: MetaEvalConfig, verbose: Optional[str] = None) -> Dict:
+def run_meta_eval(
+    config: MetaEvalConfig,
+    verbose: Optional[str] = None,
+    skip_generation: bool = False,
+) -> Dict:
     """
     Run a full meta-evaluation as described in *config*.
 
@@ -46,6 +50,9 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[str] = None) -> Dict
           and final summaries.
         - ``"all"``  — everything in ``"some"`` plus per-dataset generation
           progress and per-metric prints.
+    skip_generation : bool
+        If ``True``, skip dataset generation and evaluate pre-existing CSV files
+        found in ``output_dir/<result_key>/``.  Raises if no files are found.
 
     Returns
     -------
@@ -114,11 +121,21 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[str] = None) -> Dict
                           f"dependency_structure")
 
             # ------------------------------------------------------------------
-            # 1. Generate noisy datasets
+            # 1. Generate or discover noisy datasets
             # ------------------------------------------------------------------
             scenario_dir = Path(config.output_dir) / result_key
 
-            if not use_sample_sizes or sample_size is None:
+            if skip_generation:
+                # Discover pre-existing CSV files; evaluate each against full real data
+                paths = sorted(str(p) for p in scenario_dir.glob("*.csv"))
+                if not paths:
+                    raise FileNotFoundError(
+                        f"--eval-only specified but no CSV files found in {scenario_dir}"
+                    )
+                eval_pairs: List[tuple] = [(p, real) for p in paths]
+                if show_some:
+                    print(f"  Found {len(paths)} existing datasets in {scenario_dir}")
+            elif not use_sample_sizes or sample_size is None:
                 # Bulk generation: generate all replicates at once from full real data
                 paths = scenario_fn(
                     df=real,
@@ -130,8 +147,7 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[str] = None) -> Dict
                     **scenario_cfg.params,
                 )
                 # Each replicate evaluates against the full real dataset
-                eval_pairs: List[tuple] = [(p, real) for p in paths]
-
+                eval_pairs = [(p, real) for p in paths]
                 if show_some:
                     print(f"  Generated {len(paths)} datasets in {scenario_dir}")
             else:
@@ -152,7 +168,6 @@ def run_meta_eval(config: MetaEvalConfig, verbose: Optional[str] = None) -> Dict
                         **scenario_cfg.params,
                     )
                     eval_pairs.append((rep_paths[0], real_sample))
-
                 if show_some:
                     print(f"  Generated {len(eval_pairs)} replicates ({size_str} each) in {scenario_dir}")
 
