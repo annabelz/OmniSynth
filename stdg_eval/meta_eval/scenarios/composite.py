@@ -114,6 +114,7 @@ def _make_composite_scenario(f_idx: int, m_idx: int):
         prefix: str = name,
         random_seed: int = 42,
         verbose: bool = False,
+        file_offset: int = 0,
     ) -> List[str]:
         f"""Composite scenario {name}: fidelity_{f_idx} then missingness_{m_idx}."""
         transform = _chain(
@@ -122,7 +123,7 @@ def _make_composite_scenario(f_idx: int, m_idx: int):
         )
         return generate_datasets(
             transform, df, n_datasets, output_dir, prefix, random_seed, col_types,
-            verbose=verbose,
+            verbose=verbose, file_offset=file_offset,
         )
 
     scenario_fn.__name__ = f"scenario_{name}"

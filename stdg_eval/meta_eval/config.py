@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -73,6 +73,32 @@ class MetaEvalConfig:
     ``{scenario_name}_full`` for the full-dataset entry.
     When omitted, the full dataset is used and keys are just
     ``{scenario_name}`` (existing behaviour).
+    """
+    metrics: Optional[Dict[str, Dict[str, bool]]] = None
+    """Per-axis metric enable/disable flags.
+
+    Example::
+
+        metrics:
+          fidelity:
+            wasserstein: true
+            tvd: true
+            hellinger: true
+            spearman: true
+            contingency: true
+            pcd: true
+            auc_roc: true
+            propensity_mse: true
+            crcl_rs: false
+            crcl_sr: false
+          missingness:
+            rate: true
+            set_distribution: true
+            missing_auroc: true
+            dependency_structure: true
+
+    Omitted keys default to ``True``.  Omitting the ``metrics`` block entirely
+    runs all metrics.
     """
     verbose: str = "some"
     """Verbosity level: ``"none"`` | ``"some"`` | ``"all"``.
@@ -121,5 +147,6 @@ def load_meta_eval_config(path: str | Path) -> MetaEvalConfig:
         axes=raw.get("axes", ["fidelity", "missingness"]),
         random_seed=int(raw.get("random_seed", 42)),
         sample_sizes=sample_sizes,
+        metrics=raw.get("metrics") or None,
         verbose=str(raw.get("verbose", "some")),
     )

@@ -32,6 +32,26 @@ axes:
   - fidelity
   - missingness
 
+# Optional: metrics to run per axis (default: all enabled)
+# Omit a key or set it to true to include; set to false to skip.
+metrics:
+  fidelity:
+    wasserstein: true
+    tvd: true
+    hellinger: true
+    spearman: true
+    contingency: true
+    pcd: true
+    auc_roc: true
+    propensity_mse: true
+    crcl_rs: false      # expensive — enable if cross-classification utility is needed
+    crcl_sr: false
+  missingness:
+    rate: true
+    set_distribution: true
+    missing_auroc: true
+    dependency_structure: true
+
 # Optional: override automatic column type inference
 # column_types:
 #   age: numerical

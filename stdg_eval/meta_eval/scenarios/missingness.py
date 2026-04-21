@@ -124,11 +124,13 @@ def scenario_missingness_1(
     prefix: str = "missingness_1",
     random_seed: int = 42,
     verbose: bool = False,
+    file_offset: int = 0,
 ) -> List[str]:
     """Missingness Scenario 1 — 10 % MCAR."""
     return generate_datasets(
         _mcar_transform(0.10),
         df, n_datasets, output_dir, prefix, random_seed, col_types, verbose=verbose,
+        file_offset=file_offset,
     )
 
 
@@ -140,11 +142,13 @@ def scenario_missingness_2(
     prefix: str = "missingness_2",
     random_seed: int = 42,
     verbose: bool = False,
+    file_offset: int = 0,
 ) -> List[str]:
     """Missingness Scenario 2 — 20 % MCAR."""
     return generate_datasets(
         _mcar_transform(0.20),
         df, n_datasets, output_dir, prefix, random_seed, col_types, verbose=verbose,
+        file_offset=file_offset,
     )
 
 
@@ -156,11 +160,13 @@ def scenario_missingness_3(
     prefix: str = "missingness_3",
     random_seed: int = 42,
     verbose: bool = False,
+    file_offset: int = 0,
 ) -> List[str]:
     """Missingness Scenario 3 — 30 % MCAR."""
     return generate_datasets(
         _mcar_transform(0.30),
         df, n_datasets, output_dir, prefix, random_seed, col_types, verbose=verbose,
+        file_offset=file_offset,
     )
 
 
@@ -172,6 +178,7 @@ def scenario_missingness_4(
     prefix: str = "missingness_4",
     random_seed: int = 42,
     verbose: bool = False,
+    file_offset: int = 0,
 ) -> List[str]:
     """Missingness Scenario 4 — MAR bivariate conditioning."""
     cols = [c for c in col_types if c in df.columns]
@@ -181,6 +188,7 @@ def scenario_missingness_4(
     return generate_datasets(
         _mar_bivariate_transform(all_pairs),
         df, n_datasets, output_dir, prefix, random_seed, col_types, verbose=verbose,
+        file_offset=file_offset,
     )
 
 
@@ -192,6 +200,7 @@ def scenario_missingness_5(
     prefix: str = "missingness_5",
     random_seed: int = 42,
     verbose: bool = False,
+    file_offset: int = 0,
 ) -> List[str]:
     """Missingness Scenario 5 — MNAR self-conditioning."""
     cols = [c for c in col_types if c in df.columns]
@@ -200,6 +209,7 @@ def scenario_missingness_5(
     return generate_datasets(
         _mnar_self_transform(cols),
         df, n_datasets, output_dir, prefix, random_seed, col_types, verbose=verbose,
+        file_offset=file_offset,
     )
 
 

@@ -150,6 +150,29 @@ class AucRoc(BaseMetric):
             ])
 
         cv = StratifiedKFold(n_splits=self.cv_folds, shuffle=True, random_state=self.random_state)
+        # Guard: CV fails if only one class is present (e.g. all synthetic rows
+        # dropped by dropna), or if the minority class has fewer samples than
+        # cv_folds. Fall back to a neutral AUROC (0.5 → score = 1.0).
+        class_counts = np.bincount(y)
+        min_class_count = int(class_counts.min()) if len(class_counts) > 1 else 0
+        if len(class_counts) < 2 or min_class_count < self.cv_folds:
+            mean_auroc = 0.5
+            std_auroc = 0.0
+            score = 1.0
+            details = {
+                "mean_auroc": mean_auroc,
+                "std_auroc": std_auroc,
+                "fold_aurocs": [],
+                "n_real": len(real),
+                "n_synthetic": len(synthetic),
+                "oob_auroc": oob_auroc,
+                "note": f"Skipped CV: only {len(class_counts)} class(es) present or minority class has {min_class_count} samples < {self.cv_folds} folds",
+            }
+            return MetricResult(
+                metric_name=self.name,
+                score=score,
+                details=details,
+            )
         auroc_scores = cross_val_score(clf, X, y, cv=cv, scoring="roc_auc")
 
         mean_auroc = float(np.mean(auroc_scores))
@@ -252,6 +275,24 @@ class PropensityMSE(BaseMetric):
 
         X = pd.concat([r_enc, s_enc], ignore_index=True).values
         y = np.array([0] * len(r_enc) + [1] * len(s_enc))
+
+        # Guard: CV fails if only one class present or minority class too small.
+        # Fall back to neutral pMSE=0 → score=1.
+        class_counts = np.bincount(y)
+        min_class_count = int(class_counts.min()) if len(class_counts) > 1 else 0
+        if len(class_counts) < 2 or min_class_count < self.cv_folds:
+            return MetricResult(
+                metric_name=self.name,
+                score=1.0,
+                details={
+                    "pmse": 0.0,
+                    "pmse_worst_case": 0.25,
+                    "c_synthetic_fraction": len(s_enc) / max(len(X), 1),
+                    "propensity_scores": [],
+                    "labels": y.tolist(),
+                    "note": f"Skipped CV: only {len(class_counts)} class(es) present or minority class has {min_class_count} samples < {self.cv_folds} folds",
+                },
+            )
 
         # Compute propensity scores via k-fold cross-validation to avoid overfitting
         clf = self._build_model()

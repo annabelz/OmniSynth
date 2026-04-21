@@ -26,9 +26,49 @@ from stdg_eval.evaluation.scoring import (
     compute_missingness_score,
     compute_composite_score,
 )
+from stdg_eval.config import EvalConfig, FidelityConfig
 from stdg_eval.meta_eval.config import MetaEvalConfig
 from stdg_eval.meta_eval.scenarios import SCENARIO_REGISTRY
 from stdg_eval.utils.data_utils import detect_column_types
+
+
+def _build_eval_config(metrics: dict) -> EvalConfig:
+    """Build an EvalConfig from a ``metrics`` dict (fidelity/missingness sub-dicts)."""
+    fid_cfg = metrics.get("fidelity", {})
+    fc = FidelityConfig(
+        run_wasserstein=bool(fid_cfg.get("wasserstein", True)),
+        run_tvd=bool(fid_cfg.get("tvd", True)),
+        run_hellinger=bool(fid_cfg.get("hellinger", True)),
+        run_spearman=bool(fid_cfg.get("spearman", True)),
+        run_contingency=bool(fid_cfg.get("contingency", True)),
+        run_pcd=bool(fid_cfg.get("pcd", True)),
+        run_auc_roc=bool(fid_cfg.get("auc_roc", True)),
+        run_propensity_mse=bool(fid_cfg.get("propensity_mse", True)),
+        run_crcl_rs=bool(fid_cfg.get("crcl_rs", True)),
+        run_crcl_sr=bool(fid_cfg.get("crcl_sr", True)),
+    )
+    return EvalConfig(fidelity=fc)
+
+
+def _fidelity_group_flags(metrics: dict) -> dict:
+    """Return run_univariate/bivariate/multivariate kwargs derived from the metrics dict."""
+    fid = metrics.get("fidelity", {})
+    return {
+        "run_univariate": any(fid.get(k, True) for k in ("wasserstein", "tvd", "hellinger")),
+        "run_bivariate":  any(fid.get(k, True) for k in ("spearman", "contingency", "pcd")),
+        "run_multivariate": any(fid.get(k, True) for k in ("auc_roc", "propensity_mse", "crcl_rs", "crcl_sr")),
+    }
+
+
+def _missingness_flags(metrics: dict) -> dict:
+    """Return run_* kwargs for evaluate_missingness derived from the metrics dict."""
+    miss = metrics.get("missingness", {})
+    return {
+        "run_rate":                 bool(miss.get("rate", True)),
+        "run_set_distribution":     bool(miss.get("set_distribution", True)),
+        "run_missing_auroc":        bool(miss.get("missing_auroc", True)),
+        "run_dependency_structure": bool(miss.get("dependency_structure", True)),
+    }
 
 
 def run_meta_eval(
@@ -73,6 +113,12 @@ def run_meta_eval(
     real = pd.read_csv(config.input_data)
     col_types = detect_column_types(real, override=config.column_types)
 
+    # Build evaluation kwargs from optional metrics config
+    _metrics = config.metrics or {}
+    eval_config = _build_eval_config(_metrics) if _metrics else None
+    fid_group_flags = _fidelity_group_flags(_metrics)
+    miss_flags = _missingness_flags(_metrics)
+
     run_fidelity = "fidelity" in config.axes
     run_missingness = "missingness" in config.axes
 
@@ -103,10 +149,10 @@ def run_meta_eval(
             if not use_sample_sizes:
                 result_key = name
             else:
-                size_tag = "full" if sample_size is None else f"n{sample_size}"
+                size_tag = f"n{len(real)}" if sample_size is None else f"n{sample_size}"
                 result_key = f"{name}_{size_tag}"
 
-            size_str = "full dataset" if sample_size is None else f"n={sample_size:,}"
+            size_str = f"n={len(real):,} (full)" if sample_size is None else f"n={sample_size:,}"
 
             if show_some:
                 print(f"\n{'='*60}")
@@ -127,16 +173,31 @@ def run_meta_eval(
             # ------------------------------------------------------------------
             # 1. Generate or discover noisy datasets
             # ------------------------------------------------------------------
-            scenario_dir = Path(config.output_dir) / result_key
+            # Directory layout:
+            #   output_dir/{name}/              — no sample_sizes in config
+            #   output_dir/{name}/{size_tag}/   — sample_sizes configured (incl. null → n{len(real)})
+            if not use_sample_sizes:
+                scenario_dir = Path(config.output_dir) / name
+            else:
+                scenario_dir = Path(config.output_dir) / name / size_tag
 
             if skip_generation:
-                # Discover pre-existing CSV files; evaluate each against full real data
                 paths = sorted(str(p) for p in scenario_dir.glob("*.csv"))
                 if not paths:
                     raise FileNotFoundError(
                         f"--eval-only specified but no CSV files found in {scenario_dir}"
                     )
-                eval_pairs: List[tuple] = [(p, real) for p in paths]
+                if use_sample_sizes and sample_size is not None:
+                    # Reconstruct the per-replicate samples using the same seeds used
+                    # during generation, so each noisy file is evaluated against its
+                    # original sample rather than the full dataset.
+                    eval_pairs: List[tuple] = []
+                    for i, path in enumerate(paths):
+                        n = min(sample_size, len(real))
+                        real_sample = real.sample(n=n, random_state=config.random_seed + i).reset_index(drop=True)
+                        eval_pairs.append((path, real_sample))
+                else:
+                    eval_pairs = [(p, real) for p in paths]
                 if show_some:
                     print(f"  Found {len(paths)} existing datasets in {scenario_dir}")
             elif not use_sample_sizes or sample_size is None:
@@ -156,19 +217,19 @@ def run_meta_eval(
                     print(f"  Generated {len(paths)} datasets in {scenario_dir}")
             else:
                 # Per-replicate sampling: draw a fresh random sample for each replicate,
-                # generate one noisy dataset from it, evaluate against that same sample.
+                # generate one noisy dataset into the shared size directory.
                 eval_pairs = []
                 for i in range(scenario_cfg.n_datasets):
                     n = min(sample_size, len(real))
                     real_sample = real.sample(n=n, random_state=config.random_seed + i).reset_index(drop=True)
-                    rep_dir = scenario_dir / f"rep_{i:03d}"
                     rep_paths = scenario_fn(
                         df=real_sample,
                         n_datasets=1,
-                        output_dir=rep_dir,
+                        output_dir=scenario_dir,
                         col_types=col_types,
                         prefix=name,
                         random_seed=config.random_seed + i,
+                        file_offset=i,
                         **scenario_cfg.params,
                     )
                     eval_pairs.append((rep_paths[0], real_sample))
@@ -199,13 +260,21 @@ def run_meta_eval(
                     warnings.simplefilter("ignore")
 
                     if run_fidelity:
-                        fid = evaluate_fidelity(real_ref, synth, col_types=col_types, verbose=show_all)
+                        fid = evaluate_fidelity(
+                            real_ref, synth, col_types=col_types,
+                            config=eval_config, verbose=show_all,
+                            **fid_group_flags,
+                        )
                         f_scores = compute_fidelity_score(fid)
                     else:
                         f_scores = {}
 
                     if run_missingness:
-                        miss = evaluate_missingness(real_ref, synth, col_types=col_types, verbose=show_all)
+                        miss = evaluate_missingness(
+                            real_ref, synth, col_types=col_types,
+                            config=eval_config, verbose=show_all,
+                            **miss_flags,
+                        )
                         m_scores = compute_missingness_score(miss)
                     else:
                         m_scores = {}

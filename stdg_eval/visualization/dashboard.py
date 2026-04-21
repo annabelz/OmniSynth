@@ -1858,6 +1858,8 @@ def _tab_ranking():
 # ===========================================================================
 
 def _tab_meta_eval():
+    import re as _re
+
     st.header("Meta-evaluation Report")
     st.caption(
         "Results from running the benchmark on programmatically generated noisy datasets. "
@@ -1904,19 +1906,20 @@ def _tab_meta_eval():
     st.subheader("Summary across scenarios")
     axis_filter = st.selectbox(
         "Show scenarios for axis",
-        ["All", "Fidelity", "Missingness"],
+        ["All", "Fidelity", "Missingness", "Composite"],
         key="meta_summary_axis",
     )
     all_scenarios = list(meta.keys())
     if axis_filter == "Fidelity":
-        filtered_scenarios = [s for s in all_scenarios if s.startswith("fidelity")]
+        filtered_scenarios = [s for s in all_scenarios if _re.match(r"^fidelity", s)]
     elif axis_filter == "Missingness":
-        filtered_scenarios = [s for s in all_scenarios if s.startswith("missingness")]
+        filtered_scenarios = [s for s in all_scenarios if _re.match(r"^missingness", s)]
+    elif axis_filter == "Composite":
+        filtered_scenarios = [s for s in all_scenarios if _re.match(r"^composite", s)]
     else:
         filtered_scenarios = all_scenarios
     filtered_meta = {s: meta[s] for s in filtered_scenarios}
     summary_keys = [k for k in ("fidelity_overall", "missingness_overall", "composite_score") if k in all_per_ds_keys]
-    import re as _re
     has_sample_sizes = any(
         _re.search(r"_n\d+$", k) or k.endswith("_full")
         for k in filtered_meta
@@ -1926,20 +1929,6 @@ def _tab_meta_eval():
             fig = P.plot_meta_eval_summary_grouped(filtered_meta, summary_keys, score_label_map)
         else:
             fig = P.plot_meta_eval_summary(filtered_meta, summary_keys, score_label_map)
-        st.plotly_chart(fig, use_container_width=True)
-
-    # Score vs sample size line plot — only shown when sample-size results are present
-    if has_sample_sizes and summary_keys:
-        st.markdown("**Score vs sample size**")
-        size_score_key = st.selectbox(
-            "Score to compare across sample sizes",
-            summary_keys,
-            format_func=lambda k: score_label_map[k],
-            key="meta_size_score_key",
-        )
-        fig = P.plot_meta_eval_sample_size_comparison(
-            filtered_meta, size_score_key, score_label_map[size_score_key]
-        )
         st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
@@ -1992,11 +1981,13 @@ def _tab_meta_eval():
 
     fidelity_bases    = [b for b in ordered_bases if b.startswith("fidelity")]
     missingness_bases = [b for b in ordered_bases if b.startswith("missingness")]
-    other_bases       = [b for b in ordered_bases if b not in fidelity_bases + missingness_bases]
+    composite_bases   = [b for b in ordered_bases if b.startswith("composite")]
+    other_bases       = [b for b in ordered_bases if b not in fidelity_bases + missingness_bases + composite_bases]
 
     for group_label, group in [
         ("Fidelity scenarios",    fidelity_bases),
         ("Missingness scenarios",  missingness_bases),
+        ("Composite scenarios",    composite_bases),
         ("Other scenarios",        other_bases),
     ]:
         if not group:

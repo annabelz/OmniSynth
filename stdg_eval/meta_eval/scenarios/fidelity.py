@@ -140,11 +140,12 @@ def _perturb_b_numerical(
     valid_idx = [i for i in transform_idx if pd.notna(noisy.at[i, b_col])]
     if not valid_idx:
         return
+    noisy[b_col] = noisy[b_col].astype(float)
     local_mean = float(noisy.loc[valid_idx, b_col].mean())
     sign = 1.0 if local_mean > global_mean else -1.0
     noise = sign * np.abs(rng.normal(0.0, std_b, len(valid_idx)))
     for j, idx in enumerate(valid_idx):
-        noisy.at[idx, b_col] = float(noisy.at[idx, b_col]) + noise[j]
+        noisy.at[idx, b_col] = noisy.at[idx, b_col] + noise[j]
     if is_ordinal:
         observed_ints = np.sort(np.unique(df[b_col].dropna().values.astype(int)))
         noisy[b_col] = _snap_to_observed_ints(noisy[b_col], observed_ints)
@@ -238,11 +239,13 @@ def scenario_fidelity_1(
     prefix: str = "fidelity_1",
     random_seed: int = 42,
     verbose: bool = False,
+    file_offset: int = 0,
 ) -> List[str]:
     """Fidelity Scenario 1 — Low Gaussian noise, all variables."""
     return generate_datasets(
         _global_noise_transform(num_scale=1.0, cat_mode="onehot"),
         df, n_datasets, output_dir, prefix, random_seed, col_types, verbose=verbose,
+        file_offset=file_offset,
     )
 
 
@@ -254,11 +257,13 @@ def scenario_fidelity_2(
     prefix: str = "fidelity_2",
     random_seed: int = 42,
     verbose: bool = False,
+    file_offset: int = 0,
 ) -> List[str]:
     """Fidelity Scenario 2 — Low Gaussian noise, numerical/ordinal only."""
     return generate_datasets(
         _global_noise_transform(num_scale=1.0, cat_mode="none"),
         df, n_datasets, output_dir, prefix, random_seed, col_types, verbose=verbose,
+        file_offset=file_offset,
     )
 
 
@@ -270,11 +275,13 @@ def scenario_fidelity_3(
     prefix: str = "fidelity_3",
     random_seed: int = 42,
     verbose: bool = False,
+    file_offset: int = 0,
 ) -> List[str]:
     """Fidelity Scenario 3 — High Gaussian noise, all variables."""
     return generate_datasets(
         _global_noise_transform(num_scale=2.0, cat_mode="random"),
         df, n_datasets, output_dir, prefix, random_seed, col_types, verbose=verbose,
+        file_offset=file_offset,
     )
 
 
@@ -286,11 +293,13 @@ def scenario_fidelity_4(
     prefix: str = "fidelity_4",
     random_seed: int = 42,
     verbose: bool = False,
+    file_offset: int = 0,
 ) -> List[str]:
     """Fidelity Scenario 4 — High Gaussian noise, numerical/ordinal only."""
     return generate_datasets(
         _global_noise_transform(num_scale=2.0, cat_mode="none"),
         df, n_datasets, output_dir, prefix, random_seed, col_types, verbose=verbose,
+        file_offset=file_offset,
     )
 
 
@@ -302,6 +311,7 @@ def scenario_fidelity_5(
     prefix: str = "fidelity_5",
     random_seed: int = 42,
     verbose: bool = False,
+    file_offset: int = 0,
 ) -> List[str]:
     """Fidelity Scenario 5 — Structured bivariate noise (one pair×quartile per dataset)."""
     cols = [c for c in col_types if c in df.columns]
@@ -311,6 +321,7 @@ def scenario_fidelity_5(
     return generate_datasets(
         _bivariate_noise_transform(all_pairs, col_types),
         df, n_datasets, output_dir, prefix, random_seed, col_types, verbose=verbose,
+        file_offset=file_offset,
     )
 
 

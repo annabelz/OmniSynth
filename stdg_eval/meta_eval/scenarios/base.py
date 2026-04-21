@@ -41,6 +41,7 @@ def generate_datasets(
     random_seed: int,
     col_types: ColumnTypes,
     verbose: bool = False,
+    file_offset: int = 0,
 ) -> List[str]:
     """
     Generate *n_datasets* noisy variants of *df* and write each to *output_dir*.
@@ -57,13 +58,17 @@ def generate_datasets(
     output_dir:
         Directory to write CSVs into (created if absent).
     prefix:
-        Filename prefix; files are named ``{prefix}_{i:03d}.csv``.
+        Filename prefix; files are named ``{prefix}_{file_offset+i:03d}.csv``.
     random_seed:
         Dataset *i* uses seed ``random_seed + i``.
     col_types:
         Column type mapping forwarded to *transform_fn*.
     verbose:
         Print per-dataset progress and timing.
+    file_offset:
+        Starting index for output filenames.  Replicate *i* is written as
+        ``{prefix}_{file_offset + i:03d}.csv``.  Allows multiple single-dataset
+        calls to share one output directory without overwriting each other.
 
     Returns
     -------
@@ -79,8 +84,8 @@ def generate_datasets(
             print(f"  Generating dataset {i + 1}/{n_datasets}...", flush=True)
         t0 = time.time()
         rng = np.random.default_rng(random_seed + i)
-        noisy = transform_fn(df, rng, col_types, i)
-        out_path = output_dir / f"{prefix}_{i:03d}.csv"
+        noisy = transform_fn(df, rng, col_types, file_offset + i)
+        out_path = output_dir / f"{prefix}_{file_offset + i:03d}.csv"
         noisy.to_csv(out_path, index=False)
         paths.append(str(out_path.resolve()))
         if verbose:
