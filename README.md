@@ -120,6 +120,90 @@ streamlit run run_dashboard.py -- --config configs/my_config.yaml
 
 ---
 
+## Meta-evaluation
+
+The meta-evaluation pipeline benchmarks your evaluation metrics by generating programmatically noisy datasets and measuring whether the metrics respond as expected.
+
+### Running
+
+```bash
+# Generate noisy datasets AND evaluate
+stdg-eval meta-eval --config configs/my_meta_eval_config.yaml
+
+# Generate datasets only (evaluation later)
+stdg-eval meta-eval --config configs/my_meta_eval_config.yaml --generate-only
+
+# Evaluate pre-existing generated datasets (skip regeneration)
+stdg-eval meta-eval --config configs/my_meta_eval_config.yaml --eval-only
+```
+
+`--generate-only` and `--eval-only` are mutually exclusive. The results JSON is only written when evaluation runs.
+
+### Scenarios
+
+**Fidelity** (value noise)
+
+| Name | Description |
+|------|-------------|
+| `fidelity_1` | Low Gaussian noise, all variables — numerical: N(0, 1·std); categorical: one-hot + N(0,1) → argmax |
+| `fidelity_2` | Low Gaussian noise, numerical/ordinal only; categorical unchanged |
+| `fidelity_3` | High Gaussian noise, all variables — numerical: N(0, 2·std); categorical: random reassignment |
+| `fidelity_4` | High Gaussian noise, numerical/ordinal only; categorical unchanged |
+| `fidelity_5` | Structured bivariate noise — one (variable-pair, quartile) perturbation per dataset |
+
+**Missingness** (value masking)
+
+| Name | Description |
+|------|-------------|
+| `missingness_1` | 10 % MCAR — random cells replaced with NaN |
+| `missingness_2` | 20 % MCAR |
+| `missingness_3` | 30 % MCAR |
+| `missingness_4` | MAR bivariate — rows in a quartile of variable A have 50 % of their B values masked |
+| `missingness_5` | MNAR self-conditioning — rows in a quartile of X have 50 % of their X values masked |
+
+**Composite** (fidelity then missingness, applied sequentially)
+
+Named `composite_f{F}_m{M}` for F ∈ {1..5}, M ∈ {1..5} — 25 combinations total. For example, `composite_f1_m2` applies low Gaussian noise then 20 % MCAR.
+
+### Config file
+
+```yaml
+input_data: data/real.csv
+output_dir: data/meta_eval/noisy
+results_path: data/meta_eval/results.json
+random_seed: 42
+verbose: some          # none | some | all
+axes:
+  - fidelity
+  - missingness
+
+# Optional: evaluate at multiple sample sizes
+sample_sizes:
+  - 500
+  - 1000
+  - null              # full dataset
+
+scenarios:
+  - name: fidelity_1
+    n_datasets: 10
+  - name: missingness_2
+    n_datasets: 10
+  - name: composite_f1_m1
+    n_datasets: 10
+```
+
+Each scenario generates `n_datasets` noisy replicates and reports mean ± std scores across them. When `sample_sizes` is set, each replicate independently draws a fresh random sample of that size and evaluates against it; result keys are suffixed `_n{size}` (e.g. `fidelity_1_n500`) or `_full`.
+
+### Verbose output
+
+With `verbose: some`, each replicate prints fidelity, missingness, composite scores and wall-clock evaluation time:
+
+```
+  [ 3/10] → fidelity=0.8412, missingness=0.7231, composite=0.7821, time=4.3s
+```
+
+---
+
 ## Config file
 
 ```yaml
@@ -294,6 +378,14 @@ stdg-eval/
     │   ├── fidelity.py               # evaluate_fidelity()
     │   ├── missingness.py            # evaluate_missingness()
     │   └── scoring.py                # compute_*_score()
+    ├── meta_eval/
+    │   ├── config.py                 # MetaEvalConfig, load_meta_eval_config()
+    │   ├── runner.py                 # run_meta_eval()
+    │   └── scenarios/
+    │       ├── base.py               # generate_datasets(), TransformFn, quartile masks
+    │       ├── fidelity.py           # fidelity_1 – fidelity_5
+    │       ├── missingness.py        # missingness_1 – missingness_5
+    │       └── composite.py          # composite_f{1-5}_m{1-5} (25 combinations)
     ├── utils/
     │   ├── data_utils.py             # Loading, column type inference, config parsing
     │   └── precomputed_io.py         # save_precomputed(), load_precomputed()

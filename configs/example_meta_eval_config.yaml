@@ -67,6 +67,16 @@ axes:
 #                their B values masked; cycles all ordered (A,B) pairs × 4 quartiles
 # missingness_5  MNAR self-conditioning — rows in a quartile of variable X have
 #                50% of their X values masked; cycles all variables × 4 quartiles
+#
+# Available composite scenarios
+# --------------------------------
+# composite_f{F}_m{M}  Apply fidelity scenario F then missingness scenario M
+#                      sequentially (F ∈ 1–5, M ∈ 1–5; 25 combinations total)
+# Examples:
+#   composite_f1_m1  Low Gaussian noise + 10% MCAR
+#   composite_f1_m2  Low Gaussian noise + 20% MCAR
+#   composite_f3_m4  High Gaussian noise (all vars) + MAR bivariate
+#   composite_f5_m5  Structured bivariate noise + MNAR self-conditioning
 
 scenarios:
   # --- Fidelity ---
@@ -91,4 +101,56 @@ scenarios:
   - name: missingness_4
     n_datasets: 20
   - name: missingness_5
+    n_datasets: 20
+
+  # --- Composite (fidelity + missingness) ---
+  - name: composite_f1_m1
+    n_datasets: 20
+  - name: composite_f1_m2
+    n_datasets: 20
+  - name: composite_f1_m3
+    n_datasets: 20
+  - name: composite_f1_m4
+    n_datasets: 20
+  - name: composite_f1_m5
+    n_datasets: 20
+  - name: composite_f2_m1
+    n_datasets: 20
+  - name: composite_f2_m2
+    n_datasets: 20
+  - name: composite_f2_m3
+    n_datasets: 20
+  - name: composite_f2_m4
+    n_datasets: 20
+  - name: composite_f2_m5
+    n_datasets: 20
+  - name: composite_f3_m1
+    n_datasets: 20
+  - name: composite_f3_m2
+    n_datasets: 20
+  - name: composite_f3_m3
+    n_datasets: 20
+  - name: composite_f3_m4
+    n_datasets: 20
+  - name: composite_f3_m5
+    n_datasets: 20
+  - name: composite_f4_m1
+    n_datasets: 20
+  - name: composite_f4_m2
+    n_datasets: 20
+  - name: composite_f4_m3
+    n_datasets: 20
+  - name: composite_f4_m4
+    n_datasets: 20
+  - name: composite_f4_m5
+    n_datasets: 20
+  - name: composite_f5_m1
+    n_datasets: 20
+  - name: composite_f5_m2
+    n_datasets: 20
+  - name: composite_f5_m3
+    n_datasets: 20
+  - name: composite_f5_m4
+    n_datasets: 20
+  - name: composite_f5_m5
     n_datasets: 20

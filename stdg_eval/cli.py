@@ -176,12 +176,21 @@ def _cmd_meta_eval(args):
     from stdg_eval.meta_eval.config import load_meta_eval_config
     from stdg_eval.meta_eval.runner import run_meta_eval, save_meta_eval_results
 
-    cfg = load_meta_eval_config(args.config)
-    results = run_meta_eval(cfg, skip_generation=args.eval_only)
+    if args.eval_only and args.generate_only:
+        print("Error: --eval-only and --generate-only are mutually exclusive.")
+        raise SystemExit(1)
 
-    out = Path(cfg.results_path)
-    save_meta_eval_results(results, out)
-    print(f"\nMeta-evaluation results saved to {out}")
+    cfg = load_meta_eval_config(args.config)
+    results = run_meta_eval(
+        cfg,
+        skip_generation=args.eval_only,
+        generate_only=args.generate_only,
+    )
+
+    if not args.generate_only:
+        out = Path(cfg.results_path)
+        save_meta_eval_results(results, out)
+        print(f"\nMeta-evaluation results saved to {out}")
 
 
 def main():
@@ -237,6 +246,11 @@ def main():
         "--eval-only", action="store_true",
         help="Skip dataset generation and evaluate pre-existing noisy datasets "
              "found in output_dir/<scenario_name>/.",
+    )
+    meta_p.add_argument(
+        "--generate-only", action="store_true",
+        help="Generate noisy datasets for each scenario but skip evaluation. "
+             "Re-run without this flag (or with --eval-only) to evaluate later.",
     )
 
     args = parser.parse_args()

@@ -35,6 +35,7 @@ def run_meta_eval(
     config: MetaEvalConfig,
     verbose: Optional[str] = None,
     skip_generation: bool = False,
+    generate_only: bool = False,
 ) -> Dict:
     """
     Run a full meta-evaluation as described in *config*.
@@ -53,11 +54,14 @@ def run_meta_eval(
     skip_generation : bool
         If ``True``, skip dataset generation and evaluate pre-existing CSV files
         found in ``output_dir/<result_key>/``.  Raises if no files are found.
+    generate_only : bool
+        If ``True``, generate noisy datasets for each scenario but skip
+        evaluation.  Returns an empty dict.
 
     Returns
     -------
     dict
-        Nested results dict, one entry per scenario.
+        Nested results dict, one entry per scenario (empty if generate_only).
     """
     verbose = config.verbose if verbose is None else verbose
     if verbose not in ("none", "some", "all"):
@@ -170,6 +174,9 @@ def run_meta_eval(
                     eval_pairs.append((rep_paths[0], real_sample))
                 if show_some:
                     print(f"  Generated {len(eval_pairs)} replicates ({size_str} each) in {scenario_dir}")
+
+            if generate_only:
+                continue
 
             # ------------------------------------------------------------------
             # 2. Evaluate each dataset

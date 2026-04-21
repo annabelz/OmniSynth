@@ -22,16 +22,19 @@ from stdg_eval.meta_eval.scenarios.base import (
 )
 from stdg_eval.meta_eval.scenarios.fidelity import FIDELITY_SCENARIOS
 from stdg_eval.meta_eval.scenarios.missingness import MISSINGNESS_SCENARIOS
+from stdg_eval.meta_eval.scenarios.composite import COMPOSITE_SCENARIOS
 
 SCENARIO_REGISTRY: dict = {
     **FIDELITY_SCENARIOS,
     **MISSINGNESS_SCENARIOS,
+    **COMPOSITE_SCENARIOS,
 }
 
 __all__ = [
     "SCENARIO_REGISTRY",
     "FIDELITY_SCENARIOS",
     "MISSINGNESS_SCENARIOS",
+    "COMPOSITE_SCENARIOS",
     "generate_datasets",
     "numerical_quartile_mask",
     "categorical_quartile_mask",
