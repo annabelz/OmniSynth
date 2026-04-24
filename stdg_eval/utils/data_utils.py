@@ -271,26 +271,60 @@ def eval_config_from_dict(cfg: dict) -> EvalConfig:
     Build an :class:`~stdg_eval.config.EvalConfig` from a loaded config dict.
 
     Reads the optional ``metrics`` key and maps it to ``FidelityConfig`` and
-    ``MissingnessConfig`` enable flags.  Unknown metric names are silently ignored.
+    ``MissingnessConfig`` enable flags.
+
+    Accepts both formats:
+    - Nested: ``metrics: {fidelity: {wasserstein: true, ...}, missingness: {...}}``
+    - Flat (legacy): ``metrics: {wasserstein: true, tvd: false, ...}``
     """
-    metrics = cfg.get("metrics") or {}
+    raw_metrics = cfg.get("metrics") or {}
+
+    # Detect nested vs flat format
+    if "fidelity" in raw_metrics or "missingness" in raw_metrics:
+        fid_m = raw_metrics.get("fidelity") or {}
+        miss_m = raw_metrics.get("missingness") or {}
+    else:
+        fid_m = raw_metrics
+        miss_m = raw_metrics
 
     fidelity = FidelityConfig(
-        run_wasserstein=metrics.get("wasserstein", True),
-        run_tvd=metrics.get("tvd", True),
-        run_hellinger=metrics.get("hellinger", True),
-        run_spearman=metrics.get("spearman", True),
-        run_contingency=metrics.get("contingency", True),
-        run_pcd=metrics.get("pairwise_correlation_difference", True),
-        run_auc_roc=metrics.get("auc_roc", True),
-        run_propensity_mse=metrics.get("propensity_mse", True),
-        run_crcl_rs=metrics.get("crcl_rs", True),
-        run_crcl_sr=metrics.get("crcl_sr", True),
+        run_wasserstein=bool(fid_m.get("wasserstein", True)),
+        run_tvd=bool(fid_m.get("tvd", True)),
+        run_hellinger=bool(fid_m.get("hellinger", True)),
+        run_spearman=bool(fid_m.get("spearman", True)),
+        run_contingency=bool(fid_m.get("contingency", True)),
+        run_pcd=bool(fid_m.get("pcd", fid_m.get("pairwise_correlation_difference", True))),
+        run_auc_roc=bool(fid_m.get("auc_roc", True)),
+        run_propensity_mse=bool(fid_m.get("propensity_mse", True)),
+        run_crcl_rs=bool(fid_m.get("crcl_rs", True)),
+        run_crcl_sr=bool(fid_m.get("crcl_sr", True)),
     )
     missingness = MissingnessConfig(
-        run_rate=metrics.get("rate", True),
-        run_set_distribution=metrics.get("set_distribution", True),
-        run_missing_auroc=metrics.get("missing_auroc", True),
-        run_dependency_structure=metrics.get("dependency_structure", True),
+        run_rate=bool(miss_m.get("rate", True)),
+        run_set_distribution=bool(miss_m.get("set_distribution", True)),
+        run_missing_auroc=bool(miss_m.get("missing_auroc", True)),
+        run_dependency_structure=bool(miss_m.get("dependency_structure", True)),
     )
     return EvalConfig(fidelity=fidelity, missingness=missingness)
+
+
+def weights_from_dict(cfg: dict) -> dict:
+    """
+    Extract scoring weights from a loaded config dict.
+
+    Expected config structure::
+
+        weights:
+          fidelity: [0.34, 0.33, 0.33]      # [univariate, bivariate, multivariate]
+          missingness: [0.25, 0.25, 0.25, 0.25]  # [rate, set_distribution, missing_auroc, dependency_structure]
+          composite: [0.5, 0.5]             # [fidelity, missingness]
+
+    Returns a dict with keys ``"fidelity"``, ``"missingness"``, ``"composite"``
+    (each a list of floats, or None if not specified).
+    """
+    raw = cfg.get("weights") or {}
+    return {
+        "fidelity":    raw.get("fidelity"),
+        "missingness": raw.get("missingness"),
+        "composite":   raw.get("composite"),
+    }

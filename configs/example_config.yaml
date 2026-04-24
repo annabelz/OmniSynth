@@ -29,24 +29,28 @@ synthetic_datasets:
 
 # Optional: enable or disable individual metrics (all default to true if omitted)
 # metrics:
-#   # Univariate fidelity
-#   wasserstein: true          # Wasserstein distance (numerical columns)
-#   tvd: true                  # Total variation distance (categorical columns)
-#   hellinger: true            # Hellinger distance (all columns)
-#   # Bivariate fidelity
-#   spearman: true             # Spearman correlation (numerical pairs)
-#   contingency: true          # Contingency TVD (categorical / mixed pairs)
-#   pairwise_correlation_difference: true  # Phi-k correlation difference (all pairs)
-#   # Multivariate fidelity
-#   auc_roc: true              # Classifier AUC-ROC (distinguishability)
-#   propensity_mse: true       # Propensity score MSE
-#   crcl_rs: true              # Cross-classification real→synth
-#   crcl_sr: true              # Cross-classification synth→real
-#   # Missingness
-#   rate: true                 # Per-variable missingness rates
-#   set_distribution: true     # Missingness pattern distribution TVD
-#   missing_auroc: true        # Classifier AUROC on missingness indicator
-#   dependency_structure: true # Missingness dependency (phi-correlation) structure
+#   fidelity:
+#     wasserstein: true        # Wasserstein distance (numerical columns)
+#     tvd: true                # Total variation distance (categorical columns)
+#     hellinger: true          # Hellinger distance (all columns)
+#     spearman: true           # Spearman correlation (numerical pairs)
+#     contingency: true        # Contingency TVD (categorical / mixed pairs)
+#     pcd: true                # Phi-k correlation difference (all pairs)
+#     auc_roc: true            # Classifier AUC-ROC (distinguishability)
+#     propensity_mse: true     # Propensity score MSE
+#     crcl_rs: false           # Cross-classification real→synth (expensive)
+#     crcl_sr: false           # Cross-classification synth→real (expensive)
+#   missingness:
+#     rate: true               # Per-variable missingness rates
+#     set_distribution: true   # Missingness pattern distribution TVD
+#     missing_auroc: true      # Classifier AUROC on missingness indicator
+#     dependency_structure: true  # Missingness dependency structure
+
+# Optional: scoring weights (all auto-normalised; defaults shown)
+# weights:
+#   fidelity: [0.34, 0.33, 0.33]          # [univariate, bivariate, multivariate]
+#   missingness: [0.25, 0.25, 0.25, 0.25] # [rate, set_distribution, missing_auroc, dependency_structure]
+#   composite: [0.5, 0.5]                 # [fidelity, missingness]
 
 # Optional: path to precomputed results (JSON).
 # Generate with:  stdg-eval precompute --config configs/example_config.yaml --output precomputed.json

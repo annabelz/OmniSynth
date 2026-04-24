@@ -74,6 +74,19 @@ class MetaEvalConfig:
     When omitted, the full dataset is used and keys are just
     ``{scenario_name}`` (existing behaviour).
     """
+    weights: Optional[Dict[str, Optional[List[float]]]] = None
+    """Scoring weights for each axis.
+
+    Example::
+
+        weights:
+          fidelity: [0.34, 0.33, 0.33]          # univariate, bivariate, multivariate
+          missingness: [0.25, 0.25, 0.25, 0.25]  # rate, set_distribution, missing_auroc, dependency_structure
+          composite: [0.5, 0.5]                  # fidelity, missingness
+
+    Lists are automatically normalised to sum to 1.  Omitting a key falls back
+    to the global defaults in :mod:`stdg_eval.config`.
+    """
     metrics: Optional[Dict[str, Dict[str, bool]]] = None
     """Per-axis metric enable/disable flags.
 
@@ -147,6 +160,7 @@ def load_meta_eval_config(path: str | Path) -> MetaEvalConfig:
         axes=raw.get("axes", ["fidelity", "missingness"]),
         random_seed=int(raw.get("random_seed", 42)),
         sample_sizes=sample_sizes,
+        weights=raw.get("weights") or None,
         metrics=raw.get("metrics") or None,
         verbose=str(raw.get("verbose", "some")),
     )

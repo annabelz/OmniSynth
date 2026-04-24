@@ -51,7 +51,7 @@ from stdg_eval.evaluation.scoring import (
     compute_fidelity_score,
     compute_missingness_score,
 )
-from stdg_eval.utils.data_utils import detect_column_types, load_dataset, load_config, validate_column_types, eval_config_from_dict
+from stdg_eval.utils.data_utils import detect_column_types, load_dataset, load_config, validate_column_types, eval_config_from_dict, weights_from_dict
 from stdg_eval.utils.precomputed_io import load_precomputed
 from stdg_eval.visualization import plots as P
 from stdg_eval.visualization.metric_registry import (
@@ -187,24 +187,46 @@ def _sidebar():
                 # file is loaded (detected via content hash). After initial load the
                 # sidebar checkboxes are the source of truth and are not overwritten,
                 # so the user can freely toggle metrics that were disabled in the config.
-                if "metrics" in cfg and st.session_state.get("_config_hash") != cfg_hash:
-                    eval_cfg = eval_config_from_dict(cfg)
-                    fc = eval_cfg.fidelity
-                    mc = eval_cfg.missingness
-                    st.session_state["run_wd"] = fc.run_wasserstein
-                    st.session_state["run_tvd"] = fc.run_tvd
-                    st.session_state["run_hd"] = fc.run_hellinger
-                    st.session_state["run_spearman"] = fc.run_spearman
-                    st.session_state["run_contingency"] = fc.run_contingency
-                    st.session_state["run_pcd"] = fc.run_pcd
-                    st.session_state["run_cc"] = fc.run_auc_roc
-                    st.session_state["run_pmse"] = fc.run_propensity_mse
-                    st.session_state["run_crcl_rs"] = fc.run_crcl_rs
-                    st.session_state["run_crcl_sr"] = fc.run_crcl_sr
-                    st.session_state["run_miss_rate"] = mc.run_rate
-                    st.session_state["run_miss_set"] = mc.run_set_distribution
-                    st.session_state["run_miss_auroc"] = mc.run_missing_auroc
-                    st.session_state["run_miss_dep"] = mc.run_dependency_structure
+                if st.session_state.get("_config_hash") != cfg_hash:
+                    if "metrics" in cfg:
+                        eval_cfg = eval_config_from_dict(cfg)
+                        fc = eval_cfg.fidelity
+                        mc = eval_cfg.missingness
+                        st.session_state["run_wd"] = fc.run_wasserstein
+                        st.session_state["run_tvd"] = fc.run_tvd
+                        st.session_state["run_hd"] = fc.run_hellinger
+                        st.session_state["run_spearman"] = fc.run_spearman
+                        st.session_state["run_contingency"] = fc.run_contingency
+                        st.session_state["run_pcd"] = fc.run_pcd
+                        st.session_state["run_cc"] = fc.run_auc_roc
+                        st.session_state["run_pmse"] = fc.run_propensity_mse
+                        st.session_state["run_crcl_rs"] = fc.run_crcl_rs
+                        st.session_state["run_crcl_sr"] = fc.run_crcl_sr
+                        st.session_state["run_miss_rate"] = mc.run_rate
+                        st.session_state["run_miss_set"] = mc.run_set_distribution
+                        st.session_state["run_miss_auroc"] = mc.run_missing_auroc
+                        st.session_state["run_miss_dep"] = mc.run_dependency_structure
+                    if "weights" in cfg:
+                        import numpy as _np
+                        w = weights_from_dict(cfg)
+                        fid_w = w.get("fidelity")
+                        if fid_w:
+                            arr = _np.array(fid_w, dtype=float)
+                            arr = arr / arr.sum()
+                            for g, v in zip(FIDELITY_GROUPS, arr):
+                                st.session_state[g["w_key"]] = float(v)
+                        miss_w = w.get("missingness")
+                        if miss_w:
+                            arr = _np.array(miss_w, dtype=float)
+                            arr = arr / arr.sum()
+                            for m, v in zip(MISSINGNESS_METRICS, arr):
+                                st.session_state[m["w_key"]] = float(v)
+                        comp_w = w.get("composite")
+                        if comp_w and len(comp_w) >= 2:
+                            arr = _np.array(comp_w[:2], dtype=float)
+                            arr = arr / arr.sum()
+                            st.session_state["w_fid"] = float(arr[0])
+                            st.session_state["w_miss"] = float(arr[1])
                 st.session_state["_config_hash"] = cfg_hash
 
                 # --- Load summary note ---

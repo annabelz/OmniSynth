@@ -52,6 +52,14 @@ metrics:
     missing_auroc: true
     dependency_structure: true
 
+# Optional: scoring weights for each axis.
+# Lists are automatically normalised — [1, 2, 1] and [0.25, 0.5, 0.25] are equivalent.
+# Omitting a key uses the global default (equal weights within each axis).
+# weights:
+#   fidelity: [0.34, 0.33, 0.33]           # univariate, bivariate, multivariate
+#   missingness: [0.25, 0.25, 0.25, 0.25]  # rate, set_distribution, missing_auroc, dependency_structure
+#   composite: [0.5, 0.5]                  # fidelity, missingness
+
 # Optional: override automatic column type inference
 # column_types:
 #   age: numerical

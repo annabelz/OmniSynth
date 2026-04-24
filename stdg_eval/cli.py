@@ -51,13 +51,37 @@ def _cmd_evaluate(args):
         compute_missingness_score,
         compute_composite_score,
     )
-    from stdg_eval.utils.data_utils import load_config
+    from stdg_eval.utils.data_utils import load_config, eval_config_from_dict, weights_from_dict
+
+    eval_cfg = None
+    w_fidelity = w_missingness = w_composite = None
+    run_uni = run_bi = run_multi = True
+    run_miss_flags = {}
 
     if args.config:
         cfg = load_config(args.config)
         real = pd.read_csv(cfg["real_data"])
         synth_entries = [(e["name"], e["path"]) for e in cfg.get("synthetic_datasets", [])]
         col_types = cfg.get("column_types") or None
+
+        if "metrics" in cfg:
+            eval_cfg = eval_config_from_dict(cfg)
+            fc = eval_cfg.fidelity
+            run_uni   = any([fc.run_wasserstein, fc.run_tvd, fc.run_hellinger])
+            run_bi    = any([fc.run_spearman, fc.run_contingency, fc.run_pcd])
+            run_multi = any([fc.run_auc_roc, fc.run_propensity_mse, fc.run_crcl_rs, fc.run_crcl_sr])
+            mc = eval_cfg.missingness
+            run_miss_flags = {
+                "run_rate":                 mc.run_rate,
+                "run_set_distribution":     mc.run_set_distribution,
+                "run_missing_auroc":        mc.run_missing_auroc,
+                "run_dependency_structure": mc.run_dependency_structure,
+            }
+
+        weights = weights_from_dict(cfg)
+        w_fidelity    = weights["fidelity"]
+        w_missingness = weights["missingness"]
+        w_composite   = weights["composite"]
     else:
         if not args.real or not args.synth:
             print("Error: provide either --config or both --real and --synth.", file=sys.stderr)
@@ -75,12 +99,19 @@ def _cmd_evaluate(args):
         t0 = time.time()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            fid = evaluate_fidelity(real, synth, col_types=col_types, verbose=True)
-            miss = evaluate_missingness(real, synth, col_types=col_types, verbose=True)
+            fid = evaluate_fidelity(
+                real, synth, col_types=col_types, config=eval_cfg,
+                run_univariate=run_uni, run_bivariate=run_bi, run_multivariate=run_multi,
+                verbose=True,
+            )
+            miss = evaluate_missingness(
+                real, synth, col_types=col_types, config=eval_cfg,
+                verbose=True, **run_miss_flags,
+            )
 
-        f_scores = compute_fidelity_score(fid)
-        m_scores = compute_missingness_score(miss)
-        comp = compute_composite_score(f_scores, m_scores)
+        f_scores = compute_fidelity_score(fid, weights=w_fidelity)
+        m_scores = compute_missingness_score(miss, weights=w_missingness)
+        comp = compute_composite_score(f_scores, m_scores, weights=w_composite)
         elapsed = time.time() - t0
 
         results[name] = {
@@ -91,6 +122,11 @@ def _cmd_evaluate(args):
                 "univariate": f_scores.get("univariate"),
                 "bivariate": f_scores.get("bivariate"),
                 "multivariate": f_scores.get("multivariate"),
+            },
+            "weights_used": {
+                "fidelity": f_scores.get("weights_used"),
+                "missingness": m_scores.get("weights_used"),
+                "composite": comp.get("weights_used"),
             },
         }
         print(f"[{name}]  fidelity={f_scores['overall']:.4f}  "

@@ -119,6 +119,12 @@ def run_meta_eval(
     fid_group_flags = _fidelity_group_flags(_metrics)
     miss_flags = _missingness_flags(_metrics)
 
+    # Scoring weights (fall back to defaults when not specified)
+    _weights = config.weights or {}
+    w_fidelity = _weights.get("fidelity")
+    w_missingness = _weights.get("missingness")
+    w_composite = _weights.get("composite")
+
     run_fidelity = "fidelity" in config.axes
     run_missingness = "missingness" in config.axes
 
@@ -265,7 +271,7 @@ def run_meta_eval(
                             config=eval_config, verbose=show_all,
                             **fid_group_flags,
                         )
-                        f_scores = compute_fidelity_score(fid)
+                        f_scores = compute_fidelity_score(fid, weights=w_fidelity)
                     else:
                         f_scores = {}
 
@@ -275,11 +281,11 @@ def run_meta_eval(
                             config=eval_config, verbose=show_all,
                             **miss_flags,
                         )
-                        m_scores = compute_missingness_score(miss)
+                        m_scores = compute_missingness_score(miss, weights=w_missingness)
                     else:
                         m_scores = {}
 
-                    comp = compute_composite_score(f_scores, m_scores) if (f_scores or m_scores) else {}
+                    comp = compute_composite_score(f_scores, m_scores, weights=w_composite) if (f_scores or m_scores) else {}
                 elapsed = time.monotonic() - t0
 
                 for k, v in f_scores.items():
