@@ -221,12 +221,14 @@ def _cmd_meta_eval(args):
         cfg,
         skip_generation=args.eval_only,
         generate_only=args.generate_only,
+        merge=args.merge,
+        scenarios=args.scenarios,
     )
 
     if not args.generate_only:
         out = Path(cfg.results_path)
-        save_meta_eval_results(results, out)
-        print(f"\nMeta-evaluation results saved to {out}")
+        save_meta_eval_results(results, out, merge=args.merge)
+        print(f"\nMeta-evaluation results {'merged into' if args.merge else 'saved to'} {out}")
 
 
 def main():
@@ -287,6 +289,17 @@ def main():
         "--generate-only", action="store_true",
         help="Generate noisy datasets for each scenario but skip evaluation. "
              "Re-run without this flag (or with --eval-only) to evaluate later.",
+    )
+    meta_p.add_argument(
+        "--merge", action="store_true",
+        help="Merge new results into the existing results file instead of "
+             "overwriting it.  Useful for adding a single scenario without "
+             "re-running the full pipeline.",
+    )
+    meta_p.add_argument(
+        "--scenarios", nargs="+", default=None, metavar="SCENARIO",
+        help="Run only the named scenario(s) from the config "
+             "(e.g. --scenarios baseline fidelity_1).  Others are skipped.",
     )
 
     args = parser.parse_args()

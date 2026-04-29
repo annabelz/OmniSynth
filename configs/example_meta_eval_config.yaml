@@ -72,6 +72,11 @@ metrics:
 # Scenarios to run. Each entry requires a name (from the registry below) and
 # n_datasets (number of noisy replicates to generate and evaluate).
 #
+# Available baseline scenario
+# ----------------------------
+# baseline    Identity transform — output is an exact copy of the input sample.
+#             Establishes the upper-bound ceiling; real-vs-real should score ~1.0.
+#
 # Available fidelity scenarios
 # ----------------------------
 # fidelity_1  Low Gaussian noise, all variables
@@ -107,6 +112,10 @@ metrics:
 #   composite_f5_m5  Structured bivariate noise + MNAR self-conditioning
 
 scenarios:
+  # --- Baseline ---
+  - name: baseline
+    n_datasets: 20
+
   # --- Fidelity ---
   - name: fidelity_1
     n_datasets: 20

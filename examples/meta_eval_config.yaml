@@ -69,6 +69,10 @@ column_types:
 #                50% of their X values masked; cycles all variables × 4 quartiles
 
 scenarios:
+  # --- Baseline ---
+  - name: baseline
+    n_datasets: 10
+
   # --- Fidelity ---
   - name: fidelity_1
     n_datasets: 10

@@ -76,6 +76,8 @@ def run_meta_eval(
     verbose: Optional[str] = None,
     skip_generation: bool = False,
     generate_only: bool = False,
+    merge: bool = False,
+    scenarios: Optional[List[str]] = None,
 ) -> Dict:
     """
     Run a full meta-evaluation as described in *config*.
@@ -97,6 +99,14 @@ def run_meta_eval(
     generate_only : bool
         If ``True``, generate noisy datasets for each scenario but skip
         evaluation.  Returns an empty dict.
+    merge : bool
+        If ``True``, load any existing results from ``config.results_path``
+        before running and merge new results into them.  Existing scenario keys
+        are preserved; keys produced by this run overwrite any prior values for
+        those keys.
+    scenarios : list of str, optional
+        If provided, only the named scenarios are run (others in the config are
+        skipped).  Names must still exist in the SCENARIO_REGISTRY.
 
     Returns
     -------
@@ -128,7 +138,24 @@ def run_meta_eval(
     run_fidelity = "fidelity" in config.axes
     run_missingness = "missingness" in config.axes
 
+    # Seed all_results from the existing file when merging
     all_results: Dict = {}
+    if merge and config.results_path:
+        existing = Path(config.results_path)
+        if existing.exists():
+            with open(existing) as _f:
+                all_results = json.load(_f)
+            if show_some:
+                print(f"  Loaded {len(all_results)} existing scenario(s) from {existing}")
+
+    # Filter scenarios list if --scenarios was specified
+    active_scenarios = config.scenarios
+    if scenarios:
+        active_scenarios = [s for s in config.scenarios if s.name in scenarios]
+        if show_some:
+            skipped = len(config.scenarios) - len(active_scenarios)
+            print(f"  Running {len(active_scenarios)} scenario(s) "
+                  f"(skipping {skipped} not in filter)")
 
     # When sample_sizes is not specified, use a single sentinel (None = full dataset)
     # and keep the old result key format ({scenario_name}) for backwards compatibility.
@@ -139,9 +166,9 @@ def run_meta_eval(
         arr = np.array(values)
         return {"mean": float(np.mean(arr)), "std": float(np.std(arr))}
 
-    total_runs = len(config.scenarios) * len(effective_sample_sizes)
+    total_runs = len(active_scenarios) * len(effective_sample_sizes)
 
-    for scenario_cfg in config.scenarios:
+    for scenario_cfg in active_scenarios:
         name = scenario_cfg.name
         if name not in SCENARIO_REGISTRY:
             raise ValueError(
@@ -170,11 +197,19 @@ def run_meta_eval(
                 axes_str = ", ".join(config.axes)
                 print(f"  Axes       : {axes_str}")
                 if run_fidelity:
-                    print(f"  Fidelity   : wasserstein, tvd, hellinger, spearman, "
-                          f"contingency, pcd, auc_roc, propensity_mse")
+                    _fid = _metrics.get("fidelity", {})
+                    _fid_names = [m for m in (
+                        "wasserstein", "tvd", "hellinger",
+                        "spearman", "contingency", "pcd",
+                        "auc_roc", "propensity_mse", "crcl_rs", "crcl_sr",
+                    ) if bool(_fid.get(m, True))]
+                    print(f"  Fidelity   : {', '.join(_fid_names)}")
                 if run_missingness:
-                    print(f"  Missingness: rate, set_distribution, missing_auroc, "
-                          f"dependency_structure")
+                    _miss = _metrics.get("missingness", {})
+                    _miss_names = [m for m in (
+                        "rate", "set_distribution", "missing_auroc", "dependency_structure",
+                    ) if bool(_miss.get(m, True))]
+                    print(f"  Missingness: {', '.join(_miss_names)}")
 
             # ------------------------------------------------------------------
             # 1. Generate or discover noisy datasets
@@ -337,7 +372,7 @@ def run_meta_eval(
             all_results[result_key] = scenario_result
 
             if config.results_path:
-                save_meta_eval_results(all_results, config.results_path)
+                save_meta_eval_results(all_results, config.results_path, merge=False)
 
             if show_some:
                 n_done = len(all_results)
@@ -359,8 +394,24 @@ def run_meta_eval(
     return all_results
 
 
-def save_meta_eval_results(results: Dict, path: str | Path) -> None:
-    """Write meta-evaluation results to a JSON file."""
+def save_meta_eval_results(results: Dict, path: str | Path, merge: bool = False) -> None:
+    """Write meta-evaluation results to a JSON file.
+
+    Parameters
+    ----------
+    results:
+        New results to write.
+    path:
+        Destination JSON file.
+    merge:
+        If ``True`` and *path* already exists, load the existing file and
+        update it with *results* (new keys overwrite old ones) before saving.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    if merge and path.exists():
+        with open(path) as _f:
+            existing = json.load(_f)
+        existing.update(results)
+        results = existing
     path.write_text(json.dumps(results, indent=2))
