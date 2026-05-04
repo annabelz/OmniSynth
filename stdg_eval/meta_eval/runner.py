@@ -187,6 +187,22 @@ def run_meta_eval(
 
             size_str = f"n={len(real):,} (full)" if sample_size is None else f"n={sample_size:,}"
 
+            # Detect already-completed replicates when resuming with --merge
+            existing_per_dataset: List[Dict] = []
+            existing_n = 0
+            if merge and result_key in all_results:
+                existing_per_dataset = all_results[result_key].get("per_dataset", [])
+                existing_n = len(existing_per_dataset)
+                if existing_n >= scenario_cfg.n_datasets:
+                    if show_some:
+                        print(f"\n  Skipping {result_key!r} — already complete "
+                              f"({existing_n}/{scenario_cfg.n_datasets} replicates)")
+                    continue
+                if show_some:
+                    print(f"\n  Resuming {result_key!r} — "
+                          f"{existing_n}/{scenario_cfg.n_datasets} done, "
+                          f"{scenario_cfg.n_datasets - existing_n} remaining")
+
             if show_some:
                 print(f"\n{'='*60}")
                 if use_sample_sizes:
@@ -242,14 +258,16 @@ def run_meta_eval(
                 if show_some:
                     print(f"  Found {len(paths)} existing datasets in {scenario_dir}")
             elif not use_sample_sizes or sample_size is None:
-                # Bulk generation: generate all replicates at once from full real data
+                # Bulk generation: generate remaining replicates from full real data
+                n_remaining = scenario_cfg.n_datasets - existing_n
                 paths = scenario_fn(
                     df=real,
-                    n_datasets=scenario_cfg.n_datasets,
+                    n_datasets=n_remaining,
                     output_dir=scenario_dir,
                     col_types=col_types,
                     prefix=name,
-                    random_seed=config.random_seed,
+                    random_seed=config.random_seed + existing_n,
+                    file_offset=existing_n,
                     **scenario_cfg.params,
                 )
                 # Each replicate evaluates against the full real dataset
@@ -260,7 +278,7 @@ def run_meta_eval(
                 # Per-replicate sampling: draw a fresh random sample for each replicate,
                 # generate one noisy dataset into the shared size directory.
                 eval_pairs = []
-                for i in range(scenario_cfg.n_datasets):
+                for i in range(existing_n, scenario_cfg.n_datasets):
                     n = min(sample_size, len(real))
                     real_sample = real.sample(n=n, random_state=config.random_seed + i).reset_index(drop=True)
                     rep_paths = scenario_fn(
@@ -323,10 +341,17 @@ def run_meta_eval(
                     comp = compute_composite_score(f_scores, m_scores, weights=w_composite) if (f_scores or m_scores) else {}
                 elapsed = time.monotonic() - t0
 
-                for k, v in f_scores.items():
-                    if isinstance(v, float):
-                        fid_score_lists.setdefault(k, []).append(v)
-                        row[f"fidelity_{k}"] = v
+                # Save overall fidelity score
+                if isinstance(f_scores.get("overall"), float):
+                    fid_score_lists.setdefault("overall", []).append(f_scores["overall"])
+                    row["fidelity_overall"] = f_scores["overall"]
+                # Save individual metric scores from raw fidelity results
+                if run_fidelity:
+                    for group_metrics in fid.values():
+                        for metric_name, metric_result in group_metrics.items():
+                            score = float(metric_result.score)
+                            fid_score_lists.setdefault(metric_name, []).append(score)
+                            row[f"fidelity_{metric_name}"] = score
 
                 for k, v in m_scores.items():
                     if isinstance(v, float):
@@ -352,22 +377,37 @@ def run_meta_eval(
                     print(f"  [{i+1:>{len(str(n_total_pairs))}}/{n_total_pairs}] → {', '.join(parts)}", flush=True)
 
             # ------------------------------------------------------------------
-            # 3. Aggregate
+            # 3. Aggregate — combine with any existing replicates when resuming
             # ------------------------------------------------------------------
+            combined_per_dataset = existing_per_dataset + per_dataset
+
+            # Rebuild score lists from all replicates so aggregated stats are correct
+            all_fid_lists: Dict[str, List[float]] = {}
+            all_miss_lists: Dict[str, List[float]] = {}
+            all_composite: List[float] = []
+            for row_data in combined_per_dataset:
+                for k, v in row_data.items():
+                    if k.startswith("fidelity_") and isinstance(v, (int, float)):
+                        all_fid_lists.setdefault(k[len("fidelity_"):], []).append(float(v))
+                    elif k.startswith("missingness_") and isinstance(v, (int, float)):
+                        all_miss_lists.setdefault(k[len("missingness_"):], []).append(float(v))
+                    elif k == "composite_score" and isinstance(v, (int, float)):
+                        all_composite.append(float(v))
+
             scenario_result: Dict = {
-                "n_datasets": len(eval_pairs),
+                "n_datasets": len(combined_per_dataset),
                 "sample_size": sample_size,
-                "per_dataset": per_dataset,
+                "per_dataset": combined_per_dataset,
             }
 
-            if fid_score_lists:
-                scenario_result["fidelity"] = {k: _stats(v) for k, v in fid_score_lists.items()}
+            if all_fid_lists:
+                scenario_result["fidelity"] = {k: _stats(v) for k, v in all_fid_lists.items()}
 
-            if miss_score_lists:
-                scenario_result["missingness"] = {k: _stats(v) for k, v in miss_score_lists.items()}
+            if all_miss_lists:
+                scenario_result["missingness"] = {k: _stats(v) for k, v in all_miss_lists.items()}
 
-            if composite_list:
-                scenario_result["composite"] = _stats(composite_list)
+            if all_composite:
+                scenario_result["composite"] = _stats(all_composite)
 
             all_results[result_key] = scenario_result
 
@@ -380,7 +420,7 @@ def run_meta_eval(
                       f"— results written to {config.results_path}")
                 print(f"\n  Summary for {result_key}:")
                 if "fidelity" in scenario_result:
-                    ov = scenario_result["fidelity"].get("overall", {})
+                    ov = scenario_result["fidelity"].get("overall") or {}
                     print(f"    fidelity overall  mean={ov.get('mean', float('nan')):.4f}  "
                           f"std={ov.get('std', float('nan')):.4f}")
                 if "missingness" in scenario_result:
