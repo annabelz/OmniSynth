@@ -214,6 +214,17 @@ class MissingnessClassifierAUROC(BaseMetric):
             column_scores[target_col] = 1.0 - abs(auc_r - auc_s)
 
         if not column_scores:
+            real_has_missing  = real.isnull().any().any()
+            synth_has_missing = synthetic.isnull().any().any()
+            if real_has_missing != synth_has_missing:
+                # One dataset has missingness and the other does not —
+                # mechanisms fundamentally disagree.
+                return MetricResult(
+                    metric_name=self.name,
+                    score=0.0,
+                    details={"message": "One dataset has missingness and the other does not."},
+                )
+            # Neither dataset has missingness — no mechanism to compare.
             return MetricResult(
                 metric_name=self.name,
                 score=1.0,
@@ -328,6 +339,14 @@ class MissingnessDependencyStructure(BaseMetric):
         ]
 
         if len(has_missing) < 2:
+            real_has_missing  = r_ind.any().any()
+            synth_has_missing = s_ind.any().any()
+            if real_has_missing != synth_has_missing:
+                return MetricResult(
+                    metric_name=self.name,
+                    score=0.0,
+                    details={"message": "One dataset has missingness and the other does not."},
+                )
             return MetricResult(
                 metric_name=self.name,
                 score=1.0,
