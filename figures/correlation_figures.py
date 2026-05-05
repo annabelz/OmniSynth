@@ -1,5 +1,5 @@
 """
-Metric correlation figures for the stdg-eval meta-evaluation (Diabetes dataset).
+Metric correlation figures for the OmniSynth meta-evaluation (PID dataset).
 
 Figures produced
 ----------------
@@ -66,7 +66,7 @@ OUT_DIR.mkdir(exist_ok=True)
 # ---------------------------------------------------------------------------
 # Metric columns and display labels
 # ---------------------------------------------------------------------------
-# Full ordered list — includes TVD and Contingency (MIMIC only; absent from Diabetes)
+# Full ordered list — includes TVD and Contingency (MIMIC only; absent from PID)
 FIDELITY_COLS = [
     "fidelity_wasserstein",
     "fidelity_tvd",
@@ -293,9 +293,8 @@ def fig_corr_all(df: pd.DataFrame, method: str = "pearson") -> None:
         method=method,
     )
     fig.tight_layout()
-    out = OUT_DIR / f"{prefix}_all.pdf"
+    out = OUT_DIR / f"{prefix}_all.png"
     fig.savefig(out)
-    fig.savefig(out.with_suffix(".png"))
     print(f"  Saved {out}")
     plt.close(fig)
 
@@ -316,9 +315,8 @@ def fig_corr_fidelity(df: pd.DataFrame, method: str = "pearson") -> None:
         method=method,
     )
     fig.tight_layout()
-    out = OUT_DIR / f"{prefix}_fidelity.pdf"
+    out = OUT_DIR / f"{prefix}_fidelity.png"
     fig.savefig(out)
-    fig.savefig(out.with_suffix(".png"))
     print(f"  Saved {out}")
     plt.close(fig)
 
@@ -339,9 +337,8 @@ def fig_corr_missingness(df: pd.DataFrame, method: str = "pearson") -> None:
         method=method,
     )
     fig.tight_layout()
-    out = OUT_DIR / f"{prefix}_missingness.pdf"
+    out = OUT_DIR / f"{prefix}_missingness.png"
     fig.savefig(out)
-    fig.savefig(out.with_suffix(".png"))
     print(f"  Saved {out}")
     plt.close(fig)
 
@@ -349,12 +346,12 @@ def fig_corr_missingness(df: pd.DataFrame, method: str = "pearson") -> None:
 def fig_corr_by_size(df_d: pd.DataFrame, df_m: pd.DataFrame, method: str = "pearson") -> None:
     """
     Two rows of three matrices each.
-    Row 0 (Diabetes):    n=100, n=500, n=768 (full).
+    Row 0 (PID):    n=100, n=500, n=768 (full).
     Row 1 (MIMIC-IV-ED): n=500, n=1,000, n=10,000.
     """
     prefix = "kappa" if method == "kappa" else "corr"
     rows = [
-        ("Diabetes",         df_d, [(100, "n = 100"), (500, "n = 500"), (None, "n = 768 (full)")]),
+        ("PID",         df_d, [(100, "n = 100"), (500, "n = 500"), (None, "n = 768 (full)")]),
         ("MIMIC-IV-ED (CC)", df_m, [(500, "n = 500"), (1000, "n = 1,000"), (10000, "n = 10,000")]),
     ]
 
@@ -393,23 +390,22 @@ def fig_corr_by_size(df_d: pd.DataFrame, df_m: pd.DataFrame, method: str = "pear
         axes[row_idx, 0].set_ylabel(dataset_label, fontsize=9, labelpad=8)
 
     fig.tight_layout(w_pad=0.5, h_pad=1.2)
-    out = OUT_DIR / f"{prefix}_by_size.pdf"
+    out = OUT_DIR / f"{prefix}_by_size.png"
     fig.savefig(out)
-    fig.savefig(out.with_suffix(".png"))
     print(f"  Saved {out}")
     plt.close(fig)
 
 
 def fig_corr_side_by_side(df_d: pd.DataFrame, df_m: pd.DataFrame, method: str = "pearson") -> None:
     """
-    Two full agreement matrices side-by-side: Diabetes (left), MIMIC (right).
+    Two full agreement matrices side-by-side: PID (left), MIMIC (right).
 
     Each panel uses only the metrics active in that dataset, so columns differ
     between panels (e.g. TVD and Contingency appear only in MIMIC).
     """
     prefix = "kappa" if method == "kappa" else "corr"
     panels = [
-        ("Diabetes",         df_d),
+        ("PID",         df_d),
         ("MIMIC-IV-ED (CC)", df_m),
     ]
 
@@ -437,9 +433,8 @@ def fig_corr_side_by_side(df_d: pd.DataFrame, df_m: pd.DataFrame, method: str = 
         )
 
     fig.tight_layout(w_pad=1.0)
-    out = OUT_DIR / f"{prefix}_side_by_side.pdf"
+    out = OUT_DIR / f"{prefix}_side_by_side.png"
     fig.savefig(out)
-    fig.savefig(out.with_suffix(".png"))
     print(f"  Saved {out}")
     plt.close(fig)
 
@@ -448,7 +443,7 @@ def fig_corr_pooled(df_d: pd.DataFrame, df_m: pd.DataFrame, method: str = "pears
     """
     Single agreement matrix with replicates from both datasets combined.
 
-    Metrics absent from one dataset (TVD, Contingency in Diabetes) have NaN
+    Metrics absent from one dataset (TVD, Contingency in PID) have NaN
     for those rows; pearson corr() uses pairwise complete observations.
     For kappa, only rows where both columns are non-null are used.
     """
@@ -456,7 +451,7 @@ def fig_corr_pooled(df_d: pd.DataFrame, df_m: pd.DataFrame, method: str = "pears
     label  = "Cohen's κ" if method == "kappa" else "Pearson r"
     df_d = df_d.copy()
     df_m = df_m.copy()
-    df_d["dataset"] = "Diabetes"
+    df_d["dataset"] = "PID"
     df_m["dataset"] = "MIMIC-IV-ED (CC)"
     df_combined = pd.concat([df_d, df_m], ignore_index=True)
 
@@ -468,15 +463,14 @@ def fig_corr_pooled(df_d: pd.DataFrame, df_m: pd.DataFrame, method: str = "pears
     fig, ax = plt.subplots(figsize=(size, size))
     _draw_corr_matrix_with_groups(
         ax, df_combined, cols,
-        title=f"Metric agreement ({label}) — pooled (Diabetes + MIMIC-IV-ED CC)",
+        title=f"Metric agreement ({label}) — pooled (PID + MIMIC-IV-ED CC)",
         show_colorbar=True, fig=fig,
         group_boundary=n_fid,
         method=method,
     )
     fig.tight_layout()
-    out = OUT_DIR / f"{prefix}_pooled.pdf"
+    out = OUT_DIR / f"{prefix}_pooled.png"
     fig.savefig(out)
-    fig.savefig(out.with_suffix(".png"))
     print(f"  Saved {out}")
     plt.close(fig)
 
@@ -486,7 +480,7 @@ def fig_corr_pooled(df_d: pd.DataFrame, df_m: pd.DataFrame, method: str = "pears
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    print("Loading Diabetes results...")
+    print("Loading PID results...")
     df_d = _load_flat_df(DIABETES_RESULTS)
     print(f"  {len(df_d):,} replicate rows  ({df_d['scenario_key'].nunique()} scenario×size combinations)")
 
@@ -497,7 +491,7 @@ def main() -> None:
     for method in ("pearson", "kappa"):
         label = "Kappa" if method == "kappa" else "Correlation"
         print(f"\nGenerating {label} matrices:")
-        print("  Diabetes-only:")
+        print("  PID-only:")
         fig_corr_all(df_d, method=method)
         fig_corr_fidelity(df_d, method=method)
         fig_corr_missingness(df_d, method=method)

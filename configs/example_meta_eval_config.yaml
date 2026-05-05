@@ -1,7 +1,7 @@
-# stdg-eval meta-evaluation configuration
+# OmniSynth meta-evaluation configuration
 # -----------------------------------------------------------
 # Run the meta-evaluation pipeline with this config:
-#   stdg-eval meta-eval --config configs/example_meta_eval_config.yaml
+#   OmniSynth meta-eval --config configs/example_meta_eval_config.yaml
 #
 # The pipeline generates programmatically noisy datasets for each scenario,
 # evaluates them, and writes aggregated results to results_path.

@@ -1,5 +1,5 @@
 """
-Shared pytest fixtures for stdg-eval tests.
+Shared pytest fixtures for OmniSynth tests.
 
 Fixtures
 --------
@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from stdg_eval.utils.data_utils import ColumnTypes
+from omnisynth.utils.data_utils import ColumnTypes
 
 
 # ---------------------------------------------------------------------------

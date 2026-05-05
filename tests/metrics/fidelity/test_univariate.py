@@ -17,12 +17,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from stdg_eval.metrics.fidelity.univariate import (
+from omnisynth.metrics.fidelity.univariate import (
     HellingerDistance,
     TotalVariationDistance,
     WassersteinDistance,
 )
-from stdg_eval.utils.data_utils import ColumnTypes
+from omnisynth.utils.data_utils import ColumnTypes
 
 
 # ===========================================================================

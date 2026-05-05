@@ -1,7 +1,7 @@
-# stdg-eval meta-evaluation configuration
+# OmniSynth meta-evaluation configuration
 # -----------------------------------------------------------
 # Run the meta-evaluation pipeline with this config:
-#   stdg-eval meta-eval --config examples/meta_eval_config.yaml
+#   OmniSynth meta-eval --config examples/meta_eval_config.yaml
 #
 # The pipeline generates programmatically noisy datasets for each scenario,
 # evaluates them, and writes aggregated results to results_path.
@@ -9,13 +9,13 @@
 # the Meta-evaluation tab.
 
 # Path to the real (ground-truth) dataset CSV
-input_data: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/data/real.csv
+input_data: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/OmniSynth/examples/data/real.csv
 
 # Directory where generated noisy datasets are written (one sub-folder per scenario)
-output_dir: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/meta_eval/noisy
+output_dir: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/OmniSynth/examples/meta_eval/noisy
 
 # Path where the JSON results file is written
-results_path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/stdg-eval/examples/meta_eval/results.json
+results_path: /Users/annabelzhu/Desktop/MScPH/PHDS/Stage/Repo/OmniSynth/examples/meta_eval/results.json
 
 # Optional: base random seed (default 42). Dataset i within each scenario uses
 # seed random_seed + i, so results are fully reproducible.

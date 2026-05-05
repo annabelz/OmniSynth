@@ -1,5 +1,5 @@
 """
-Example workflow for stdg-eval.
+Example workflow for OmniSynth.
 
 This script demonstrates the full programmatic API without the dashboard.
 It creates a suite of toy datasets covering a range of fidelity and missingness
@@ -28,14 +28,14 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from stdg_eval.evaluation.fidelity import evaluate_fidelity
-from stdg_eval.evaluation.missingness import evaluate_missingness
-from stdg_eval.evaluation.scoring import (
+from omnisynth.evaluation.fidelity import evaluate_fidelity
+from omnisynth.evaluation.missingness import evaluate_missingness
+from omnisynth.evaluation.scoring import (
     compute_composite_score,
     compute_fidelity_score,
     compute_missingness_score,
 )
-from stdg_eval.utils.data_utils import detect_column_types
+from omnisynth.utils.data_utils import detect_column_types
 
 
 # ---------------------------------------------------------------------------
@@ -324,4 +324,4 @@ with open(meta_eval_config_path, "w") as f:
     yaml.dump(meta_eval_config, f, default_flow_style=False, sort_keys=False)
 
 print(f"Saved meta-eval config to  {meta_eval_config_path}")
-print(f"Run meta-evaluation:       stdg-eval meta-eval --config {meta_eval_config_path}")
+print(f"Run meta-evaluation:       OmniSynth meta-eval --config {meta_eval_config_path}")

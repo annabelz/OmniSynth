@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "stdg-eval"
+name = "OmniSynth"
 version = "0.1.0"
 description = "A modular evaluation library for tabular synthetic data generation"
 readme = "README.md"
@@ -33,11 +33,11 @@ dependencies = [
 dev = ["pytest>=7.4", "pytest-cov", "black", "ruff"]
 
 [project.scripts]
-stdg-eval = "stdg_eval.cli:main"
+omnisynth = "omnisynth.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["stdg_eval*"]
+include = ["omnisynth*"]
 
 [tool.ruff]
 line-length = 100

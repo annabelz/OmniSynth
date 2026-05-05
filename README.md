@@ -1,4 +1,4 @@
-# stdg-eval
+# OmniSynth
 
 A modular Python library for evaluating tabular synthetic data, with a focus on medical / clinical datasets. Covers fidelity and missingness axes, with an interactive Streamlit dashboard and a headless CLI.
 
@@ -18,8 +18,8 @@ A modular Python library for evaluating tabular synthetic data, with a focus on 
 ## Installation
 
 ```bash
-git clone https://github.com/your-org/stdg-eval.git
-cd stdg-eval
+git clone https://github.com/your-org/OmniSynth.git
+cd OmniSynth
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
@@ -39,7 +39,7 @@ All datasets must be **tabular CSV files** where:
 
 ### Column type inference
 
-`stdg-eval` automatically infers whether each column is **numerical** or **categorical**:
+`OmniSynth` automatically infers whether each column is **numerical** or **categorical**:
 - Object / string / boolean columns → categorical.
 - Numeric columns with ≤ 20 unique values **and** a cardinality fraction ≤ 5 % → categorical.
 - All other numeric columns → numerical.
@@ -54,7 +54,7 @@ You can override this in a config file or via the dashboard sidebar.
 
 ```python
 import pandas as pd
-from stdg_eval import (
+from omnisynth import (
     evaluate_fidelity, evaluate_missingness,
     compute_fidelity_score, compute_missingness_score, compute_composite_score,
 )
@@ -95,17 +95,17 @@ comp = compute_composite_score(f_scores, m_scores, weights=[0.5, 0.5])
 
 ```bash
 # Headless evaluation → JSON
-stdg-eval evaluate --config configs/my_config.yaml --output results.json
+OmniSynth evaluate --config configs/my_config.yaml --output results.json
 
 # Precompute expensive metrics once, reuse in dashboard
-stdg-eval precompute --config configs/my_config.yaml --output precomputed.json
+OmniSynth precompute --config configs/my_config.yaml --output precomputed.json
 
 # Compute only specific groups
-stdg-eval precompute --config configs/my_config.yaml --output precomputed.json \
+OmniSynth precompute --config configs/my_config.yaml --output precomputed.json \
   --groups multivariate missingness
 
 # Launch dashboard
-stdg-eval dashboard --config configs/my_config.yaml
+OmniSynth dashboard --config configs/my_config.yaml
 ```
 
 ### Dashboard
@@ -128,13 +128,13 @@ The meta-evaluation pipeline benchmarks your evaluation metrics by generating pr
 
 ```bash
 # Generate noisy datasets AND evaluate
-stdg-eval meta-eval --config configs/my_meta_eval_config.yaml
+OmniSynth meta-eval --config configs/my_meta_eval_config.yaml
 
 # Generate datasets only (evaluation later)
-stdg-eval meta-eval --config configs/my_meta_eval_config.yaml --generate-only
+OmniSynth meta-eval --config configs/my_meta_eval_config.yaml --generate-only
 
 # Evaluate pre-existing generated datasets (skip regeneration)
-stdg-eval meta-eval --config configs/my_meta_eval_config.yaml --eval-only
+OmniSynth meta-eval --config configs/my_meta_eval_config.yaml --eval-only
 ```
 
 `--generate-only` and `--eval-only` are mutually exclusive. The results JSON is only written when evaluation runs.
@@ -246,7 +246,7 @@ precomputed_results: precomputed.json   # optional — skip recomputation in das
 Bivariate, multivariate, and missingness metrics can be slow on large datasets. Precompute them once and reload in the dashboard without re-running evaluation:
 
 ```bash
-stdg-eval precompute --config configs/my_config.yaml --output precomputed.json
+OmniSynth precompute --config configs/my_config.yaml --output precomputed.json
 ```
 
 Reference the output in your config with `precomputed_results: precomputed.json`.
@@ -344,7 +344,7 @@ The dashboard has five tabs:
 ## Project structure
 
 ```
-stdg-eval/
+OmniSynth/
 ├── run_dashboard.py
 ├── configs/example_config.yaml
 ├── examples/
@@ -363,7 +363,7 @@ stdg-eval/
 │   │   └── test_scoring.py
 │   └── utils/
 │       └── test_data_utils.py
-└── stdg_eval/
+└── omnisynth/
     ├── cli.py                        # CLI entry point
     ├── config.py                     # EvalConfig, FidelityConfig, MissingnessConfig
     ├── metrics/
@@ -405,8 +405,8 @@ stdg-eval/
 4. Add a plot function in `visualization/plots.py` and wire it into the relevant expander in `dashboard.py`.
 
 ```python
-from stdg_eval.metrics.base import BaseMetric, MetricResult
-from stdg_eval.utils.data_utils import ColumnTypes
+from omnisynth.metrics.base import BaseMetric, MetricResult
+from omnisynth.utils.data_utils import ColumnTypes
 import pandas as pd
 
 class MyMetric(BaseMetric):

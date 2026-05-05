@@ -1,5 +1,5 @@
 """
-Publication figures for the stdg-eval meta-evaluation.
+Publication figures for the OmniSynth meta-evaluation.
 
 NeurIPS formatting
 ------------------
@@ -104,13 +104,13 @@ def _size_colors(n: int):
 # ---------------------------------------------------------------------------
 # Main results: Diabetes + MIMIC-IV-ED complete-case (CC)
 RESULTS = {
-    "Diabetes":         Path(__file__).parents[1] / "datasets/diabetes/diabetes_pub_results.json",
+    "PID":         Path(__file__).parents[1] / "datasets/diabetes/diabetes_pub_results.json",
     "MIMIC-IV-ED (CC)": Path(__file__).parents[1] / "datasets/mimic-iv_ed/mimiciv_pub_results.json",
 }
 
 # Sensitivity / supplementary: MIMIC-IV-ED non-CC (preserves inherent missingness)
 RESULTS_NONCC = {
-    "MIMIC-IV-ED": Path("/home/annabelzhu/stdg-eval/datasets/mimic-iv-ed-2.2/meta_eval/results_nonCC_trimmed.json"),
+    "MIMIC-IV-ED": Path("/home/annabelzhu/OmniSynth/datasets/mimic-iv-ed-2.2/meta_eval/results_nonCC_trimmed.json"),
 }
 
 OUT_DIR = Path(__file__).parent / "output"
@@ -223,10 +223,9 @@ def _despine(ax):
 
 
 def _save(fig: plt.Figure, name: str):
-    for ext in ("pdf", "png"):
-        path = OUT_DIR / f"{name}.{ext}"
-        fig.savefig(path)
-        print(f"  Saved {path}")
+    path = OUT_DIR / f"{name}.png"
+    fig.savefig(path)
+    print(f"  Saved {path}")
     plt.close(fig)
 
 
@@ -1100,6 +1099,154 @@ def fig_sample_sizes(all_results: dict[str, dict]):
     _save(fig, "fig2_sample_sizes")
 
 
+def _draw_samplesize_violin_on_ax(
+    ax,
+    results: dict,
+    score_col: str,
+    scenario_filter,
+    ylabel: str,
+    panel_label: str,
+    show_legend: bool = True,
+    cmap=None,
+) -> list:
+    """
+    Grouped violin plot for one dataset: one violin per (scenario, sample_size).
+    Violin colour follows the dataset's colour ramp (same as the bar version).
+    Median line inside each violin; baseline reference dotted line per sample size.
+    """
+    rows = []
+    for key, entry in results.items():
+        m = re.match(r"^(.+?)(?:_n(\d+))?$", key)
+        scenario = m.group(1) if m else key
+        size = int(m.group(2)) if m and m.group(2) else None
+        for row in entry.get("per_dataset", []):
+            val = row.get(score_col)
+            if val is not None:
+                rows.append({"scenario": scenario, "sample_size": size, "value": float(val)})
+    df = pd.DataFrame(rows)
+    df = df[df["scenario"].apply(scenario_filter)].copy()
+
+    all_scenarios = sorted(df["scenario"].unique(), key=_scenario_sort_key)
+    sample_sizes  = sorted(df["sample_size"].unique(), key=lambda v: v if v is not None else -1)
+    n_scenarios   = len(all_scenarios)
+    n_sizes       = len(sample_sizes)
+
+    _cmap = cmap if cmap is not None else mpl.cm.Blues
+    colors = [_cmap(v) for v in np.linspace(0.35, 0.85, max(n_sizes, 1))]
+
+    group_width = 0.7
+    vln_w   = group_width / n_sizes
+    offsets = np.linspace(
+        -(group_width - vln_w) / 2,
+         (group_width - vln_w) / 2,
+        n_sizes,
+    )
+    x = np.arange(n_scenarios)
+    legend_handles = []
+
+    for si, (sz, color) in enumerate(zip(sample_sizes, colors)):
+        sub = df[df["sample_size"] == sz]
+        size_label = f"n={sz:,}" if sz is not None else "n=full"
+
+        for xi, sc in enumerate(all_scenarios):
+            data = sub[sub["scenario"] == sc]["value"].dropna().values
+            if len(data) < 2:
+                continue
+            pos = x[xi] + offsets[si]
+            parts = ax.violinplot(data, positions=[pos], widths=vln_w * 0.88,
+                                  showmedians=True, showextrema=False)
+            for pc in parts["bodies"]:
+                pc.set_facecolor(color)
+                pc.set_alpha(0.75)
+                pc.set_edgecolor("none")
+            parts["cmedians"].set_color("#333333")
+            parts["cmedians"].set_linewidth(0.9)
+
+        legend_handles.append(
+            plt.Rectangle((0, 0), 1, 1, fc=color, ec="none", alpha=0.75, label=size_label)
+        )
+
+        # Baseline reference line at mean of baseline replicates
+        baseline_vals = sub[sub["scenario"] == "baseline"]["value"].dropna()
+        if len(baseline_vals) > 0:
+            ax.axhline(float(baseline_vals.mean()), color=color, lw=0.8, ls=":", zorder=3)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([_tick_label(s) for s in all_scenarios], fontsize=7)
+    ax.set_ylim(0, 1.15)
+    ax.set_yticks([0.0, 0.25, 0.50, 0.75, 1.00])
+    ax.set_ylabel(ylabel)
+    ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.2f"))
+    _despine(ax)
+    _draw_group_dividers(ax, all_scenarios, label_offset=-0.10)
+
+    if show_legend:
+        ax.legend(handles=legend_handles, ncol=1, frameon=False,
+                  fontsize=7.5, handlelength=1.2,
+                  loc="upper left", bbox_to_anchor=(1.01, 1), borderaxespad=0)
+    ax.text(-0.07, 1.02, panel_label, transform=ax.transAxes,
+            fontsize=10, fontweight="bold", va="bottom", ha="left")
+    return legend_handles
+
+
+def fig_violin_sample_sizes(all_results: dict[str, dict]) -> None:
+    """
+    Violin version of fig_sample_sizes.
+
+    Rows    : one per dataset (PID, MIMIC-IV-ED CC)
+    Columns : fidelity score, missingness score, composite score
+    Violins : one per (scenario, sample size); colour ramp matches fig2
+    Baseline reference lines dotted per sample-size colour.
+    """
+    dataset_names = list(all_results.keys())
+    n_rows = len(dataset_names)
+    single = lambda s: s == "baseline" or s.startswith("fidelity") or s.startswith("missingness")
+    panel_labels = [["(a)", "(b)", "(c)"], ["(d)", "(e)", "(f)"]]
+    row_cmaps = [mpl.cm.Blues, mpl.cm.Oranges]
+
+    col_specs = [
+        ("fidelity_overall",    "Fidelity score (0–1)"),
+        ("missingness_overall", "Missingness score (0–1)"),
+        ("composite_score",     "Composite score (0–1)"),
+    ]
+
+    fig, axes = plt.subplots(n_rows, 3,
+                             figsize=(FULL_W * 1.5, 3.5 * n_rows),
+                             layout="constrained")
+    if n_rows == 1:
+        axes = [axes]
+
+    for ri, dname in enumerate(dataset_names):
+        results  = all_results[dname]
+        cmap     = row_cmaps[ri % len(row_cmaps)]
+        row_axes = axes[ri]
+
+        row_axes[1].set_title(dname, fontsize=9, loc="center", fontweight="bold", pad=10)
+
+        handles = []
+        for ci, (score_col, ylabel) in enumerate(col_specs):
+            h = _draw_samplesize_violin_on_ax(
+                row_axes[ci], results,
+                score_col=score_col,
+                scenario_filter=single,
+                ylabel=ylabel,
+                panel_label=panel_labels[ri][ci],
+                show_legend=False,
+                cmap=cmap,
+            )
+            if ci == 0:
+                handles = h
+
+        row_axes[2].legend(
+            handles=handles, ncol=1, frameon=False,
+            fontsize=7.5, handlelength=1.2,
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1), borderaxespad=0,
+        )
+
+    _save(fig, "fig_violin_sample_sizes")
+
+
 def fig_appendix_sample_sizes(all_results: dict[str, dict]):
     """
     Appendix figure — 3 plot rows × 2 columns, composite (F×M) + baseline scenarios,
@@ -1442,7 +1589,7 @@ def fig1_selected(all_results: dict[str, dict], size_per_dataset: dict):
         Full results dict keyed by dataset name.
     size_per_dataset : dict
         Maps dataset name → sample size (int or None for full).
-        e.g. {"Diabetes": None, "MIMIC-IV-ED (CC)": 10000}
+        e.g. {"PID": None, "MIMIC-IV-ED (CC)": 10000}
     """
     filtered = {
         dname: _filter_results_by_sample_size(res, size_per_dataset.get(dname))
@@ -1529,11 +1676,19 @@ def fig_baseline_metric_scores(
         "fidelity_crcl_rs":        "CrCl-RS",
         "fidelity_crcl_sr":        "CrCl-SR",
     }
-    GROUP_BOUNDARIES = [3, 6]   # indices where bivariate and multivariate start
-    GROUP_LABELS = {1: "Univariate", 4: "Bivariate", 7: "Multivariate"}
+    METRIC_TO_GROUP = {
+        "fidelity_wasserstein": "Univariate", "fidelity_tvd": "Univariate",
+        "fidelity_hellinger":   "Univariate", "fidelity_spearman": "Bivariate",
+        "fidelity_contingency": "Bivariate",  "fidelity_pcd": "Bivariate",
+        "fidelity_auc_roc":        "Multivariate",
+        "fidelity_propensity_mse": "Multivariate",
+        "fidelity_crcl_rs":        "Multivariate",
+        "fidelity_crcl_sr":        "Multivariate",
+    }
+    GROUP_ORDER = ["Univariate", "Bivariate", "Multivariate"]
 
     dataset_colors = {
-        "Diabetes":         WONG["blue"],
+        "PID":         WONG["blue"],
         "MIMIC-IV-ED (CC)": ORANGE_DARK,
     }
     dataset_names = list(all_results.keys())
@@ -1569,11 +1724,17 @@ def fig_baseline_metric_scores(
     offsets    = np.linspace(-(n_datasets - 1) / 2 * bar_w,
                               (n_datasets - 1) / 2 * bar_w, n_datasets)
 
+    # Find indices where the group changes among visible metrics
+    boundary_indices = {
+        i for i in range(1, n_metrics)
+        if METRIC_TO_GROUP.get(visible_metrics[i]) != METRIC_TO_GROUP.get(visible_metrics[i - 1])
+    }
+
     # Compute x positions with extra gap at group boundaries
     x_positions = []
     extra = 0.0
     for i in range(n_metrics):
-        if i in GROUP_BOUNDARIES:
+        if i in boundary_indices:
             extra += group_gap
         x_positions.append(i + extra)
     x_positions = np.array(x_positions)
@@ -1603,21 +1764,21 @@ def fig_baseline_metric_scores(
         )
         legend_handles.append(bars)
 
-    # Group divider lines and labels
-    boundary_indices = [i for i in range(n_metrics) if i in GROUP_BOUNDARIES]
-    for bi in boundary_indices:
+    # Group divider lines
+    for bi in sorted(boundary_indices):
         gap_x = (x_positions[bi - 1] + x_positions[bi]) / 2
         ax.axvline(gap_x, color="grey", lw=0.8, linestyle=":", alpha=0.7)
 
-    group_label_positions = {
-        0: np.mean(x_positions[0:3]),
-        3: np.mean(x_positions[3:6]),
-        6: np.mean(x_positions[6:]),
-    }
-    for start_i, label in [(0, "Univariate"), (3, "Bivariate"), (6, "Multivariate")]:
-        end_i = min(start_i + 3, n_metrics)
-        mid_x = np.mean(x_positions[start_i:end_i])
-        ax.text(mid_x, -0.24, label, ha="center", va="top",
+    # Group labels centred over their visible metrics
+    from collections import defaultdict
+    group_xs: dict[str, list] = defaultdict(list)
+    for i, m in enumerate(visible_metrics):
+        group_xs[METRIC_TO_GROUP[m]].append(x_positions[i])
+    for group in GROUP_ORDER:
+        if group not in group_xs:
+            continue
+        mid_x = np.mean(group_xs[group])
+        ax.text(mid_x, -0.24, group, ha="center", va="top",
                 fontsize=7.5, fontstyle="italic",
                 transform=ax.get_xaxis_transform())
 
@@ -1643,6 +1804,767 @@ def fig_baseline_metric_scores(
     _save(fig, f"fig_baseline_metric_scores{suffix}")
 
 
+def fig_scenario_metric_grid(
+    all_results: dict[str, dict],
+    size_per_dataset: Optional[dict] = None,
+) -> None:
+    """
+    Grid of bar charts: one row per scenario, two columns (fidelity | missingness).
+
+    Row 0 is the baseline.  Fidelity scenarios follow, then missingness scenarios.
+    Each cell shows per-metric mean ± std for the specified sample size.
+
+    Parameters
+    ----------
+    size_per_dataset : dict, optional
+        Maps dataset name → sample size (int or None for full dataset).
+        Defaults to the largest available size per dataset.
+    """
+    SCENARIO_ORDER = [
+        ("baseline",      "Baseline"),
+        ("fidelity_1",    "F1"),
+        ("fidelity_3",    "F3"),
+        ("fidelity_5",    "F5"),
+        ("missingness_1", "M1"),
+        ("missingness_2", "M2"),
+        ("missingness_3", "M3"),
+        ("missingness_4", "M4"),
+        ("missingness_5", "M5"),
+    ]
+    # Section separators: row indices where a new section begins
+    SECTION_STARTS = {0: "Baseline", 1: "Fidelity scenarios", 4: "Missingness scenarios"}
+
+    FID_METRICS = [
+        "fidelity_wasserstein", "fidelity_tvd", "fidelity_hellinger",
+        "fidelity_spearman", "fidelity_contingency", "fidelity_pcd",
+        "fidelity_auc_roc", "fidelity_propensity_mse",
+        "fidelity_crcl_rs", "fidelity_crcl_sr",
+    ]
+    MISS_METRICS = [
+        "missingness_rate", "missingness_set_distribution",
+        "missingness_missing_auroc", "missingness_dependency_structure",
+    ]
+    METRIC_LABELS_SHORT = {
+        "fidelity_wasserstein":              "Wass.",
+        "fidelity_tvd":                      "TVD",
+        "fidelity_hellinger":                "Hell.",
+        "fidelity_spearman":                 "Spear.",
+        "fidelity_contingency":              "Cont.",
+        "fidelity_pcd":                      "PCD",
+        "fidelity_auc_roc":                  "AUC-ROC",
+        "fidelity_propensity_mse":           "Prop. MSE",
+        "fidelity_crcl_rs":                  "CrCl-RS",
+        "fidelity_crcl_sr":                  "CrCl-SR",
+        "missingness_rate":                  "Rate",
+        "missingness_set_distribution":      "Pattern",
+        "missingness_missing_auroc":         "AUROC",
+        "missingness_dependency_structure":  "Dep.",
+    }
+    METRIC_TO_GROUP = {
+        "fidelity_wasserstein": "Univariate", "fidelity_tvd": "Univariate",
+        "fidelity_hellinger":   "Univariate", "fidelity_spearman": "Bivariate",
+        "fidelity_contingency": "Bivariate",  "fidelity_pcd": "Bivariate",
+        "fidelity_auc_roc": "Multivariate", "fidelity_propensity_mse": "Multivariate",
+        "fidelity_crcl_rs": "Multivariate", "fidelity_crcl_sr": "Multivariate",
+    }
+
+    dataset_names = list(all_results.keys())
+    dataset_colors = {
+        "PID":         WONG["blue"],
+        "MIMIC-IV-ED (CC)": ORANGE_DARK,
+    }
+
+    # -----------------------------------------------------------------------
+    # Collect stats: scenario_key → dataset → metric → (mean, std)
+    # -----------------------------------------------------------------------
+    def _collect(scenario_prefix: str) -> dict[str, dict[str, tuple]]:
+        out: dict[str, dict[str, tuple]] = {}
+        for dname, results in all_results.items():
+            target_size = size_per_dataset.get(dname) if size_per_dataset else None
+            rows = []
+            for key, entry in results.items():
+                if not re.match(rf"^{scenario_prefix}(\b|_n)", key):
+                    continue
+                if size_per_dataset is not None and entry.get("sample_size") != target_size:
+                    continue
+                rows.extend(entry["per_dataset"])
+            if not rows:
+                continue
+            ds: dict[str, tuple] = {}
+            for col in FID_METRICS + MISS_METRICS:
+                vals = [r[col] for r in rows if col in r and r[col] is not None]
+                if vals:
+                    ds[col] = (float(np.mean(vals)), float(np.std(vals)))
+            out[dname] = ds
+        return out
+
+    all_stats = {
+        sc_key: _collect(sc_key) for sc_key, _ in SCENARIO_ORDER
+    }
+
+    # Determine which metrics are visible (present in ≥1 dataset across any scenario)
+    all_rows_combined = {
+        m: any(m in ds for sc_stats in all_stats.values() for ds in sc_stats.values())
+        for m in FID_METRICS + MISS_METRICS
+    }
+    vis_fid  = [m for m in FID_METRICS  if all_rows_combined[m]]
+    vis_miss = [m for m in MISS_METRICS if all_rows_combined[m]]
+
+    # x positions for fidelity panel (with group gaps)
+    fid_boundaries = {
+        i for i in range(1, len(vis_fid))
+        if METRIC_TO_GROUP.get(vis_fid[i]) != METRIC_TO_GROUP.get(vis_fid[i - 1])
+    }
+    def _xpos(metrics, boundaries):
+        pos, extra = [], 0.0
+        for i in range(len(metrics)):
+            if i in boundaries:
+                extra += 0.15
+            pos.append(i + extra)
+        return np.array(pos)
+
+    xpos_fid  = _xpos(vis_fid,  fid_boundaries)
+    xpos_miss = _xpos(vis_miss, set())
+
+    n_scenarios = len(SCENARIO_ORDER)
+    n_ds = len(dataset_names)
+    bar_w = 0.3
+    offsets = np.linspace(-(n_ds - 1) / 2 * bar_w, (n_ds - 1) / 2 * bar_w, n_ds)
+
+    row_h = 1.15
+    fig, axes = plt.subplots(
+        n_scenarios, 2,
+        figsize=(FULL_W, n_scenarios * row_h + 0.6),
+        sharey=False,
+    )
+
+    col_headers = ["Fidelity metrics", "Missingness metrics"]
+    for ci, hdr in enumerate(col_headers):
+        axes[0, ci].set_title(hdr, fontsize=8, fontweight="bold", pad=3)
+
+    for ri, (sc_key, sc_label) in enumerate(SCENARIO_ORDER):
+        sc_stats = all_stats[sc_key]
+
+        for ci, (metrics, xpos, boundaries) in enumerate([
+            (vis_fid,  xpos_fid,  fid_boundaries),
+            (vis_miss, xpos_miss, set()),
+        ]):
+            ax = axes[ri, ci]
+            is_bottom = (ri == n_scenarios - 1)
+
+            for di, dname in enumerate(dataset_names):
+                if dname not in sc_stats:
+                    continue
+                color = dataset_colors.get(dname, WONG["black"])
+                means = [sc_stats[dname].get(m, (np.nan, np.nan))[0] for m in metrics]
+                errs  = [sc_stats[dname].get(m, (np.nan, np.nan))[1] for m in metrics]
+                ax.bar(
+                    xpos + offsets[di], means,
+                    width=bar_w, color=color, alpha=0.85,
+                    yerr=errs,
+                    error_kw={"elinewidth": 0.6, "capsize": 1.5, "capthick": 0.6},
+                    label=dname if ri == 0 else None,
+                )
+
+            # Group dividers (fidelity column only)
+            for bi in sorted(boundaries):
+                gap_x = (xpos[bi - 1] + xpos[bi]) / 2
+                ax.axvline(gap_x, color="grey", lw=0.6, linestyle=":", alpha=0.6)
+
+            ax.set_xlim(xpos[0] - 0.5, xpos[-1] + 0.5)
+            ax.set_ylim(0, 1.09)
+            ax.axhline(1.0, color="grey", lw=0.5, linestyle="--", alpha=0.4)
+            ax.tick_params(axis="y", labelsize=6)
+            _despine(ax)
+
+            # x-tick labels only on bottom row
+            if is_bottom:
+                ax.set_xticks(xpos)
+                ax.set_xticklabels(
+                    [METRIC_LABELS_SHORT[m] for m in metrics],
+                    fontsize=6.5, rotation=30, ha="right",
+                )
+            else:
+                ax.set_xticks([])
+
+        # Scenario label on left column
+        axes[ri, 0].set_ylabel(sc_label, fontsize=8, labelpad=4)
+
+        # Horizontal line above section starts
+        if ri in SECTION_STARTS and ri > 0:
+            for ci in range(2):
+                axes[ri, ci].spines["top"].set_visible(True)
+                axes[ri, ci].spines["top"].set_linewidth(0.8)
+                axes[ri, ci].spines["top"].set_color("#555555")
+
+    # Shared y-label
+    fig.text(0.0, 0.5, "Score", va="center", rotation="vertical", fontsize=8)
+
+    # Legend from first-row handles
+    handles = [
+        mpl.patches.Patch(facecolor=dataset_colors.get(d, WONG["black"]), alpha=0.85, label=d)
+        for d in dataset_names
+    ]
+    fig.legend(
+        handles=handles, ncol=len(dataset_names), frameon=False,
+        fontsize=8, loc="lower center",
+        bbox_to_anchor=(0.5, -0.01),
+    )
+
+    fig.tight_layout(rect=[0.03, 0.03, 1.0, 1.0], h_pad=0.4, w_pad=0.6)
+    suffix = "_selected" if size_per_dataset else ""
+    _save(fig, f"fig_scenario_metric_grid{suffix}")
+
+
+def export_scenario_table(
+    all_results: dict[str, dict],
+    size_per_dataset: Optional[dict] = None,
+) -> None:
+    """
+    Export the scenario × metric data as a LaTeX booktabs table.
+
+    Rows : scenarios (Baseline, F1, F3, F5, M1–M5), two sub-rows each
+           (one per dataset).
+    Cols : enabled fidelity metrics then missingness metrics.
+    Cells: mean ± std across replicates at the specified sample size.
+
+    Writes: figures/output/scenario_table.tex
+    Requires in LaTeX preamble:
+        \\usepackage{booktabs}
+    """
+    SCENARIO_ORDER = [
+        ("baseline",      "Baseline"),
+        ("fidelity_1",    "F1"),
+        ("fidelity_2",    "F2"),
+        ("fidelity_3",    "F3"),
+        ("fidelity_4",    "F4"),
+        ("fidelity_5",    "F5"),
+        ("missingness_1", "M1"),
+        ("missingness_2", "M2"),
+        ("missingness_3", "M3"),
+        ("missingness_4", "M4"),
+        ("missingness_5", "M5"),
+    ]
+    SECTION_AFTER = {"baseline", "fidelity_5"}   # insert \midrule after these
+
+    FID_METRICS = [
+        "fidelity_wasserstein", "fidelity_tvd", "fidelity_hellinger",
+        "fidelity_spearman", "fidelity_contingency", "fidelity_pcd",
+        "fidelity_auc_roc", "fidelity_propensity_mse",
+        "fidelity_crcl_rs", "fidelity_crcl_sr",
+    ]
+    MISS_METRICS = [
+        "missingness_rate", "missingness_set_distribution",
+        "missingness_missing_auroc", "missingness_dependency_structure",
+    ]
+    COL_LABELS = {
+        "fidelity_wasserstein":             "Wass.",
+        "fidelity_tvd":                     "TVD",
+        "fidelity_hellinger":               "Hell.",
+        "fidelity_spearman":                "Spear.",
+        "fidelity_contingency":             "Cont.",
+        "fidelity_pcd":                     "PCD",
+        "fidelity_auc_roc":                 "AuRoc",
+        "fidelity_propensity_mse":          "pMSE",
+        "fidelity_crcl_rs":                 "CrCl-RS",
+        "fidelity_crcl_sr":                 "CrCl-SR",
+        "missingness_rate":                 "MissRateDiff",
+        "missingness_set_distribution":     "MissSet",
+        "missingness_missing_auroc":        "MissAuRoc",
+        "missingness_dependency_structure": "MissDep.",
+    }
+    DS_LABELS = {
+        "PID":         "PID",
+        "MIMIC-IV-ED (CC)": "MIMIC",
+    }
+
+    dataset_names = list(all_results.keys())
+
+    # -----------------------------------------------------------------------
+    # Collect stats (same logic as fig_scenario_metric_grid)
+    # -----------------------------------------------------------------------
+    def _collect(scenario_prefix: str) -> dict:
+        out: dict = {}
+        for dname, results in all_results.items():
+            target_size = size_per_dataset.get(dname) if size_per_dataset else None
+            rows = []
+            for key, entry in results.items():
+                if not re.match(rf"^{scenario_prefix}(\b|_n)", key):
+                    continue
+                if size_per_dataset is not None and entry.get("sample_size") != target_size:
+                    continue
+                rows.extend(entry["per_dataset"])
+            if not rows:
+                continue
+            ds: dict = {}
+            for col in FID_METRICS + MISS_METRICS:
+                vals = [r[col] for r in rows if col in r and r[col] is not None]
+                if vals:
+                    ds[col] = (float(np.mean(vals)), float(np.std(vals)))
+            out[dname] = ds
+        return out
+
+    all_stats = {sc_key: _collect(sc_key) for sc_key, _ in SCENARIO_ORDER}
+
+    # Determine visible metrics (present in ≥1 dataset across any scenario)
+    def _visible(metrics):
+        return [
+            m for m in metrics
+            if any(m in ds for sc in all_stats.values() for ds in sc.values())
+        ]
+
+    vis_fid  = _visible(FID_METRICS)
+    vis_miss = _visible(MISS_METRICS)
+    all_metrics = vis_fid + vis_miss
+    n_fid  = len(vis_fid)
+    n_miss = len(vis_miss)
+    n_cols = n_fid + n_miss
+
+    # -----------------------------------------------------------------------
+    # Build LaTeX
+    # -----------------------------------------------------------------------
+    col_fmt = "ll" + "c" * n_cols
+    lines = [f"\\begin{{tabular}}{{{col_fmt}}}"]
+    lines.append("\\toprule")
+
+    # Header row 1: group spans
+    group_header = " & ".join([
+        "",
+        "",
+        f"\\multicolumn{{{n_fid}}}{{c}}{{Fidelity}}",
+        f"\\multicolumn{{{n_miss}}}{{c}}{{Missingness}}",
+    ])
+    lines.append(group_header + " \\\\")
+    lines.append(
+        f"\\cmidrule(lr){{3-{2 + n_fid}}} "
+        f"\\cmidrule(lr){{{3 + n_fid}-{2 + n_cols}}}"
+    )
+
+    # Header row 2: metric names
+    metric_header = "Scenario & Dataset & " + " & ".join(
+        COL_LABELS[m] for m in all_metrics
+    )
+    lines.append(metric_header + " \\\\")
+    lines.append("\\midrule")
+
+    # Data rows
+    for sc_key, sc_label in SCENARIO_ORDER:
+        sc_stats = all_stats[sc_key]
+        for di, dname in enumerate(dataset_names):
+            ds_stats = sc_stats.get(dname, {})
+            ds_label = DS_LABELS.get(dname, dname)
+
+            cells = []
+            for m in all_metrics:
+                if m in ds_stats:
+                    mean, std = ds_stats[m]
+                    cells.append(f"${mean:.3f} \\pm {std:.3f}$")
+                else:
+                    cells.append("--")
+
+            # Scenario label only on first sub-row; blank on subsequent rows
+            sc_cell = sc_label if di == 0 else ""
+
+            row = " & ".join([sc_cell, ds_label] + cells)
+            lines.append(row + " \\\\")
+
+        if sc_key in SECTION_AFTER:
+            lines.append("\\midrule")
+
+    lines.append("\\bottomrule")
+    lines.append("\\end{tabular}")
+
+    out = OUT_DIR / "scenario_table.tex"
+    out.write_text("\n".join(lines) + "\n")
+    print(f"  Saved {out}")
+
+
+def fig_metric_heatmap(
+    all_results: dict[str, dict],
+    size_per_dataset: Optional[dict] = None,
+) -> None:
+    """
+    Heatmap of per-metric mean scores across all scenarios, one panel per dataset.
+
+    Rows    : scenarios (Baseline, F1–F5, M1–M5)
+    Columns : individual metrics (fidelity group | missingness group)
+    Colour  : mean score 0–1 (RdYlGn: red = low, green = high)
+    Cells   : annotated with mean score; NaN shown in light grey
+
+    Immediately reveals which metric is dragging a score down in each scenario.
+    """
+    SCENARIO_ORDER = [
+        ("baseline",      "Baseline"),
+        ("fidelity_1",    "F1"),
+        ("fidelity_2",    "F2"),
+        ("fidelity_3",    "F3"),
+        ("fidelity_4",    "F4"),
+        ("fidelity_5",    "F5"),
+        ("missingness_1", "M1"),
+        ("missingness_2", "M2"),
+        ("missingness_3", "M3"),
+        ("missingness_4", "M4"),
+        ("missingness_5", "M5"),
+    ]
+    # Horizontal separators: draw line above these row indices
+    H_SEP = {1, 6}   # between Baseline/Fidelity and Fidelity/Missingness
+
+    FID_METRICS = [
+        "fidelity_wasserstein", "fidelity_tvd", "fidelity_hellinger",
+        "fidelity_spearman", "fidelity_contingency", "fidelity_pcd",
+        "fidelity_auc_roc", "fidelity_propensity_mse",
+        "fidelity_crcl_rs", "fidelity_crcl_sr",
+    ]
+    MISS_METRICS = [
+        "missingness_rate", "missingness_set_distribution",
+        "missingness_missing_auroc", "missingness_dependency_structure",
+    ]
+    METRIC_LABELS = {
+        "fidelity_wasserstein":             "Wass.",
+        "fidelity_tvd":                     "TVD",
+        "fidelity_hellinger":               "Hell.",
+        "fidelity_spearman":                "Spear.",
+        "fidelity_contingency":             "Cont.",
+        "fidelity_pcd":                     "PCD",
+        "fidelity_auc_roc":                 "AuRoc",
+        "fidelity_propensity_mse":          "pMSE",
+        "fidelity_crcl_rs":                 "CrCl-RS",
+        "fidelity_crcl_sr":                 "CrCl-SR",
+        "missingness_rate":                 "MissRateDiff",
+        "missingness_set_distribution":     "MissSet",
+        "missingness_missing_auroc":        "MissAuRoc",
+        "missingness_dependency_structure": "MissDep.",
+    }
+
+    all_metrics_ordered = FID_METRICS + MISS_METRICS
+    dataset_names = list(all_results.keys())
+    n_scenarios   = len(SCENARIO_ORDER)
+
+    # -----------------------------------------------------------------------
+    # Collect mean score per (dataset, scenario, metric)
+    # -----------------------------------------------------------------------
+    def _collect(scenario_prefix: str, dname: str, results: dict) -> dict:
+        target_size = size_per_dataset.get(dname) if size_per_dataset else None
+        rows = []
+        for key, entry in results.items():
+            if not re.match(rf"^{scenario_prefix}(\b|_n)", key):
+                continue
+            if size_per_dataset is not None and entry.get("sample_size") != target_size:
+                continue
+            rows.extend(entry["per_dataset"])
+        if not rows:
+            return {}
+        out = {}
+        for col in all_metrics_ordered:
+            vals = [r[col] for r in rows if col in r and r[col] is not None]
+            if vals:
+                out[col] = float(np.mean(vals))
+        return out
+
+    # Determine visible metrics (present in ≥1 dataset × scenario)
+    all_sc_stats: dict[str, dict[str, dict]] = {
+        sc_key: {dname: _collect(sc_key, dname, results)
+                 for dname, results in all_results.items()}
+        for sc_key, _ in SCENARIO_ORDER
+    }
+    visible = [
+        m for m in all_metrics_ordered
+        if any(m in ds for sc in all_sc_stats.values() for ds in sc.values())
+    ]
+    n_metrics = len(visible)
+    n_fid_vis = sum(1 for m in visible if m in FID_METRICS)
+
+    # -----------------------------------------------------------------------
+    # Build figure
+    # -----------------------------------------------------------------------
+    n_ds    = len(dataset_names)
+    cell_w  = 0.48
+    cell_h  = 0.42
+    panel_w = n_metrics  * cell_w + 1.2
+    panel_h = n_scenarios * cell_h + 1.0
+
+    fig, axes = plt.subplots(
+        1, n_ds,
+        figsize=(panel_w * n_ds + 0.6, panel_h),
+        layout="constrained",
+    )
+    if n_ds == 1:
+        axes = [axes]
+
+    cmap_base = mpl.cm.RdYlGn
+    nan_color = "#d0d0d0"
+
+    for di, (ax, dname) in enumerate(zip(axes, dataset_names)):
+        results = all_results[dname]
+
+        # Build score matrix [n_scenarios × n_metrics]
+        mat = np.full((n_scenarios, n_metrics), np.nan)
+        for si, (sc_key, _) in enumerate(SCENARIO_ORDER):
+            ds_stats = all_sc_stats[sc_key].get(dname, {})
+            for mi, m in enumerate(visible):
+                if m in ds_stats:
+                    mat[si, mi] = ds_stats[m]
+
+        # Draw heatmap via imshow
+        masked = np.ma.masked_invalid(mat)
+        cmap_copy = cmap_base.copy()
+        cmap_copy.set_bad(nan_color)
+        im = ax.imshow(masked, cmap=cmap_copy, vmin=0, vmax=1,
+                       aspect="auto", interpolation="none")
+
+        # Cell annotations
+        for si in range(n_scenarios):
+            for mi in range(n_metrics):
+                val = mat[si, mi]
+                if np.isnan(val):
+                    continue
+                text_color = "black" if 0.25 < val < 0.85 else "white"
+                ax.text(mi, si, f"{val:.2f}", ha="center", va="center",
+                        fontsize=6.0, color=text_color)
+
+        # Vertical separator between fidelity and missingness metric groups
+        if 0 < n_fid_vis < n_metrics:
+            ax.axvline(n_fid_vis - 0.5, color="white", lw=2.0)
+
+        # Horizontal separators between scenario groups
+        for row_idx in H_SEP:
+            if 0 < row_idx < n_scenarios:
+                ax.axhline(row_idx - 0.5, color="white", lw=2.0)
+
+        # Axis ticks and labels
+        ax.set_xticks(range(n_metrics))
+        ax.set_xticklabels([METRIC_LABELS[m] for m in visible],
+                           rotation=40, ha="right", fontsize=7)
+        ax.set_yticks(range(n_scenarios))
+        ax.set_yticklabels([lbl for _, lbl in SCENARIO_ORDER], fontsize=7.5)
+        ax.tick_params(length=0)
+
+        # Title: dataset name + sample size on second line
+        sz = size_per_dataset.get(dname) if size_per_dataset else None
+        size_str = f"\nn={sz:,}" if sz is not None else ("\nn=full" if size_per_dataset else "")
+        ax.set_title(f"{dname}{size_str}", fontsize=9, fontweight="bold", pad=6)
+
+        # Metric group labels below x-tick labels
+        from matplotlib.transforms import blended_transform_factory
+        trans = blended_transform_factory(ax.transData, ax.transAxes)
+        fid_center  = (n_fid_vis - 1) / 2
+        miss_center = n_fid_vis + (n_metrics - n_fid_vis - 1) / 2
+        ax.text(fid_center,  -0.11, "Fidelity",    ha="center", va="top",
+                fontsize=7.5, fontstyle="italic", transform=trans)
+        if n_metrics > n_fid_vis:
+            ax.text(miss_center, -0.11, "Missingness", ha="center", va="top",
+                    fontsize=7.5, fontstyle="italic", transform=trans)
+
+    # Shared colourbar
+    fig.colorbar(im, ax=axes, orientation="vertical", fraction=0.02, pad=0.02,
+                 label="Mean score (0–1)")
+
+    suffix = "_selected" if size_per_dataset else ""
+    _save(fig, f"fig_metric_heatmap{suffix}")
+
+
+def fig_metric_heatmap_by_size(all_results: dict[str, dict]) -> None:
+    """
+    Heatmap grid stratified by sample size.
+
+    Rows    : one per dataset
+    Columns : one per sample size (sorted ascending; datasets may differ)
+    Each cell : scenarios × metrics heatmap (same colour scale as fig_metric_heatmap)
+    """
+    SCENARIO_ORDER = [
+        ("baseline",      "Baseline"),
+        ("fidelity_1",    "F1"),
+        ("fidelity_2",    "F2"),
+        ("fidelity_3",    "F3"),
+        ("fidelity_4",    "F4"),
+        ("fidelity_5",    "F5"),
+        ("missingness_1", "M1"),
+        ("missingness_2", "M2"),
+        ("missingness_3", "M3"),
+        ("missingness_4", "M4"),
+        ("missingness_5", "M5"),
+    ]
+    H_SEP = {1, 6}
+
+    FID_METRICS = [
+        "fidelity_wasserstein", "fidelity_tvd", "fidelity_hellinger",
+        "fidelity_spearman", "fidelity_contingency", "fidelity_pcd",
+        "fidelity_auc_roc", "fidelity_propensity_mse",
+        "fidelity_crcl_rs", "fidelity_crcl_sr",
+    ]
+    MISS_METRICS = [
+        "missingness_rate", "missingness_set_distribution",
+        "missingness_missing_auroc", "missingness_dependency_structure",
+    ]
+    METRIC_LABELS = {
+        "fidelity_wasserstein":             "Wass.",
+        "fidelity_tvd":                     "TVD",
+        "fidelity_hellinger":               "Hell.",
+        "fidelity_spearman":                "Spear.",
+        "fidelity_contingency":             "Cont.",
+        "fidelity_pcd":                     "PCD",
+        "fidelity_auc_roc":                 "AuRoc",
+        "fidelity_propensity_mse":          "pMSE",
+        "fidelity_crcl_rs":                 "CrCl-RS",
+        "fidelity_crcl_sr":                 "CrCl-SR",
+        "missingness_rate":                 "MissRateDiff",
+        "missingness_set_distribution":     "MissSet",
+        "missingness_missing_auroc":        "MissAuRoc",
+        "missingness_dependency_structure": "MissDep.",
+    }
+
+    all_metrics_ordered = FID_METRICS + MISS_METRICS
+    dataset_names = list(all_results.keys())
+    n_scenarios   = len(SCENARIO_ORDER)
+
+    # -----------------------------------------------------------------------
+    # Collect mean score per (dataset, sample_size, scenario, metric)
+    # -----------------------------------------------------------------------
+    def _collect_for_size(scenario_prefix: str, dname: str,
+                          results: dict, target_size) -> dict:
+        rows = []
+        for key, entry in results.items():
+            if not re.match(rf"^{scenario_prefix}(\b|_n)", key):
+                continue
+            if entry.get("sample_size") != target_size:
+                continue
+            rows.extend(entry["per_dataset"])
+        if not rows:
+            return {}
+        out = {}
+        for col in all_metrics_ordered:
+            vals = [r[col] for r in rows if col in r and r[col] is not None]
+            if vals:
+                out[col] = float(np.mean(vals))
+        return out
+
+    # Discover sample sizes per dataset
+    ds_sizes: dict[str, list] = {}
+    for dname, results in all_results.items():
+        sizes = sorted(
+            {entry.get("sample_size") for entry in results.values()},
+            key=lambda v: v if v is not None else float("inf"),
+        )
+        ds_sizes[dname] = sizes
+
+    max_n_sizes = max(len(s) for s in ds_sizes.values())
+    n_ds = len(dataset_names)
+
+    # Determine globally visible metrics
+    visible = [
+        m for m in all_metrics_ordered
+        if any(
+            _collect_for_size(sc_key, dname, all_results[dname], sz).get(m) is not None
+            for sc_key, _ in SCENARIO_ORDER
+            for dname in dataset_names
+            for sz in ds_sizes[dname]
+        )
+    ]
+    n_metrics  = len(visible)
+    n_fid_vis  = sum(1 for m in visible if m in FID_METRICS)
+
+    # -----------------------------------------------------------------------
+    # Build figure: rows=datasets, cols=sample sizes
+    # -----------------------------------------------------------------------
+    cell_w  = 0.46
+    cell_h  = 0.40
+    panel_w = n_metrics   * cell_w + 1.0
+    panel_h = n_scenarios * cell_h + 0.8
+
+    fig, axes = plt.subplots(
+        n_ds, max_n_sizes,
+        figsize=(panel_w * max_n_sizes + 0.6, panel_h * n_ds + 0.4),
+        layout="constrained",
+        squeeze=False,
+    )
+
+    cmap_base = mpl.cm.RdYlGn
+    nan_color = "#d0d0d0"
+    im_last   = None
+
+    for ri, dname in enumerate(dataset_names):
+        results = all_results[dname]
+        sizes   = ds_sizes[dname]
+
+        for ci in range(max_n_sizes):
+            ax = axes[ri, ci]
+
+            if ci >= len(sizes):
+                ax.set_visible(False)
+                continue
+
+            sz = sizes[ci]
+            size_label = f"n={sz:,}" if sz is not None else "n=full"
+
+            # Build score matrix [n_scenarios × n_metrics]
+            mat = np.full((n_scenarios, n_metrics), np.nan)
+            for si, (sc_key, _) in enumerate(SCENARIO_ORDER):
+                sc_stats = _collect_for_size(sc_key, dname, results, sz)
+                for mi, m in enumerate(visible):
+                    if m in sc_stats:
+                        mat[si, mi] = sc_stats[m]
+
+            masked   = np.ma.masked_invalid(mat)
+            cmap_cp  = cmap_base.copy()
+            cmap_cp.set_bad(nan_color)
+            im = ax.imshow(masked, cmap=cmap_cp, vmin=0, vmax=1,
+                           aspect="auto", interpolation="none")
+            im_last = im
+
+            # Cell annotations
+            for si in range(n_scenarios):
+                for mi in range(n_metrics):
+                    val = mat[si, mi]
+                    if np.isnan(val):
+                        continue
+                    text_color = "black" if 0.25 < val < 0.85 else "white"
+                    ax.text(mi, si, f"{val:.2f}", ha="center", va="center",
+                            fontsize=5.5, color=text_color)
+
+            # Separators
+            if 0 < n_fid_vis < n_metrics:
+                ax.axvline(n_fid_vis - 0.5, color="white", lw=2.0)
+            for row_idx in H_SEP:
+                if 0 < row_idx < n_scenarios:
+                    ax.axhline(row_idx - 0.5, color="white", lw=2.0)
+
+            # Column title: dataset name + sample size
+            ax.set_title(f"{dname}\n{size_label}", fontsize=8, pad=4)
+
+            # X ticks only on bottom row; metric group labels below them
+            if ri == n_ds - 1 or axes[ri + 1, ci].get_visible() is False:
+                ax.set_xticks(range(n_metrics))
+                ax.set_xticklabels([METRIC_LABELS[m] for m in visible],
+                                   rotation=40, ha="right", fontsize=6.5)
+                # Group labels below x-tick labels (bottom row only)
+                from matplotlib.transforms import blended_transform_factory
+                trans = blended_transform_factory(ax.transData, ax.transAxes)
+                fid_center  = (n_fid_vis - 1) / 2
+                miss_center = n_fid_vis + (n_metrics - n_fid_vis - 1) / 2
+                ax.text(fid_center,  -0.38, "Fidelity",    ha="center", va="top",
+                        fontsize=7, fontstyle="italic", transform=trans)
+                if n_metrics > n_fid_vis:
+                    ax.text(miss_center, -0.38, "Missingness", ha="center", va="top",
+                            fontsize=7, fontstyle="italic", transform=trans)
+            else:
+                ax.set_xticks([])
+
+            # Y ticks only on leftmost column (no dataset ylabel — name is in title)
+            if ci == 0:
+                ax.set_yticks(range(n_scenarios))
+                ax.set_yticklabels([lbl for _, lbl in SCENARIO_ORDER], fontsize=7)
+            else:
+                ax.set_yticks([])
+
+            ax.tick_params(length=0)
+
+    if im_last is not None:
+        fig.colorbar(im_last, ax=axes, orientation="vertical",
+                     fraction=0.015, pad=0.02, label="Mean score (0–1)")
+
+    _save(fig, "fig_metric_heatmap_by_size")
+
+
 def fig_multivariate_across_scenarios(all_results: dict[str, dict]) -> None:
     """
     Line plot of multivariate fidelity metric scores across single scenarios.
@@ -1659,7 +2581,7 @@ def fig_multivariate_across_scenarios(all_results: dict[str, dict]) -> None:
         "fidelity_crcl_sr":        ("CrCl-SR",    WONG["orange"]),
     }
     DS_STYLES = {
-        "Diabetes":         {"ls": "-",  "marker": "o"},
+        "PID":         {"ls": "-",  "marker": "o"},
         "MIMIC-IV-ED (CC)": {"ls": "--", "marker": "s"},
     }
     single = lambda s: s == "baseline" or s.startswith("fidelity") or s.startswith("missingness")
@@ -1743,6 +2665,263 @@ def fig_multivariate_across_scenarios(all_results: dict[str, dict]) -> None:
     _save(fig, "fig_multivariate_across_scenarios")
 
 
+def fig_incremental_degradation(all_results: dict[str, dict]) -> None:
+    """
+    Three-panel line plot showing how fidelity, missingness, and composite scores
+    degrade across scenarios, with one line per (dataset × sample size).
+
+    X-axis  : Baseline, F1–F4, M1–M3 (in order)
+    Lines   : one per (dataset × sample size); Blues ramp for Diabetes,
+              Oranges ramp for MIMIC; marker shape distinguishes dataset
+    Bands   : ±1 std shading
+    Panels  : (a) fidelity score, (b) missingness score, (c) composite score
+    """
+    SCENARIO_ORDER = [
+        ("baseline",      "Baseline"),
+        ("fidelity_1",    "F1"),
+        ("fidelity_2",    "F2"),
+        ("fidelity_3",    "F3"),
+        ("fidelity_4",    "F4"),
+        ("missingness_1", "M1"),
+        ("missingness_2", "M2"),
+        ("missingness_3", "M3"),
+    ]
+    DIVIDER_AFTER = 4   # last fidelity scenario index
+
+    SCORE_SPECS = [
+        ("fidelity_mean",    "fidelity_std",   "Fidelity score (0–1)",    "(a)"),
+        ("missingness_mean", "missingness_std", "Missingness score (0–1)", "(b)"),
+        ("composite_mean",   "composite_std",   "Composite score (0–1)",   "(c)"),
+    ]
+
+    DATASET_CMAPS = {
+        "PID":         mpl.cm.Blues,
+        "MIMIC-IV-ED (CC)": mpl.cm.Oranges,
+    }
+    DATASET_MARKERS = {
+        "PID":         "o",
+        "MIMIC-IV-ED (CC)": "s",
+    }
+    DS_SHORT = {
+        "PID":         "PID",
+        "MIMIC-IV-ED (CC)": "MIMIC",
+    }
+
+    scenario_keys   = [sc for sc, _ in SCENARIO_ORDER]
+    scenario_labels = [lbl for _, lbl in SCENARIO_ORDER]
+    x = np.arange(len(SCENARIO_ORDER))
+
+    # Build per-dataset summary dfs (all sample sizes)
+    dataset_dfs: dict[str, pd.DataFrame] = {}
+    for dname, results in all_results.items():
+        df = build_summary_df(results)
+        df = df[df["scenario"].isin(scenario_keys)].copy()
+        dataset_dfs[dname] = df
+
+    fig, axes = plt.subplots(1, 3, figsize=(FULL_W * 1.5, 3.2), layout="constrained")
+    legend_handles: list = []
+
+    for pi, (score_col, std_col, ylabel, panel_label) in enumerate(SCORE_SPECS):
+        ax = axes[pi]
+
+        for dname, df in dataset_dfs.items():
+            cmap   = DATASET_CMAPS.get(dname, mpl.cm.Blues)
+            marker = DATASET_MARKERS.get(dname, "o")
+            short  = DS_SHORT.get(dname, dname)
+
+            sample_sizes = sorted(
+                df["sample_size"].unique(),
+                key=lambda v: v if v is not None else float("inf"),
+            )
+            n_sizes = len(sample_sizes)
+            colors  = [cmap(v) for v in np.linspace(0.35, 0.85, max(n_sizes, 1))]
+
+            for si, sz in enumerate(sample_sizes):
+                sub    = df[df["sample_size"] == sz].set_index("scenario")
+                color  = colors[si]
+                size_label = f"n={sz:,}" if sz is not None else "n=full"
+
+                means = np.array([
+                    float(sub.loc[sc, score_col]) if sc in sub.index else np.nan
+                    for sc in scenario_keys
+                ])
+                stds = np.array([
+                    float(sub.loc[sc, std_col]) if sc in sub.index else np.nan
+                    for sc in scenario_keys
+                ])
+                mask = ~np.isnan(means)
+
+                ax.plot(x[mask], means[mask],
+                        color=color, ls="-", marker=marker,
+                        markersize=3.5, lw=1.2)
+                ax.fill_between(x[mask],
+                                means[mask] - stds[mask],
+                                means[mask] + stds[mask],
+                                color=color, alpha=0.12)
+
+                # Baseline reference line
+                if "baseline" in sub.index:
+                    baseline_val = float(sub.loc["baseline", score_col])
+                    if not np.isnan(baseline_val):
+                        ax.axhline(baseline_val, color=color, lw=0.7, ls=":",
+                                   alpha=0.7, zorder=0)
+
+                if pi == 0:
+                    legend_handles.append(
+                        Line2D([0], [0], color=color, lw=1.2, marker=marker,
+                               markersize=3.5, label=f"{short} {size_label}")
+                    )
+
+        # Vertical dividers: baseline | fidelity | missingness
+        ax.axvline(0.5, color="#888888", lw=0.7, ls=":", zorder=0)
+        ax.axvline(DIVIDER_AFTER + 0.5, color="#888888", lw=0.7, ls=":", zorder=0)
+
+        ax.annotate("Baseline",
+                    xy=(0, -0.13),
+                    xycoords=("data", "axes fraction"),
+                    ha="center", va="top", fontsize=7.5, fontstyle="italic")
+        ax.annotate("Fidelity",
+                    xy=((1 + DIVIDER_AFTER) / 2, -0.13),
+                    xycoords=("data", "axes fraction"),
+                    ha="center", va="top", fontsize=7.5, fontstyle="italic")
+        ax.annotate("Missingness",
+                    xy=((DIVIDER_AFTER + 1 + len(SCENARIO_ORDER) - 1) / 2, -0.13),
+                    xycoords=("data", "axes fraction"),
+                    ha="center", va="top", fontsize=7.5, fontstyle="italic")
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(scenario_labels, fontsize=7.5)
+        ax.set_ylim(0, 1.08)
+        ax.set_yticks([0.0, 0.25, 0.50, 0.75, 1.00])
+        ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.2f"))
+        ax.set_ylabel(ylabel)
+        _despine(ax)
+        ax.text(-0.07, 1.02, panel_label, transform=ax.transAxes,
+                fontsize=10, fontweight="bold", va="bottom", ha="left")
+
+    # Legend: Diabetes entries first, then MIMIC — naturally ordered by dataset loop
+    n_per_row = max(len(legend_handles) // 2, 1)
+    fig.legend(
+        handles=legend_handles, ncol=n_per_row, frameon=False,
+        fontsize=7.5, handlelength=1.4,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0),
+        bbox_transform=fig.transFigure,
+    )
+
+    _save(fig, "fig_incremental_degradation")
+
+
+def fig_fidelity_vs_missingness(
+    all_results: dict[str, dict],
+    size_per_dataset: Optional[dict] = None,
+) -> None:
+    """
+    Scatter plot: fidelity score (x) vs. missingness score (y).
+
+    Each point is one replicate.  Colour encodes condition type:
+      - Baseline (grey)
+      - Fidelity-degraded (F1–F5, blue)
+      - Missingness-degraded (M1–M5, vermillion)
+
+    A diagonal y=x reference line shows where both scores are equal.
+    Pearson r is annotated per panel.  Faceted by dataset.
+    """
+    CONDITION_ORDER  = ["baseline", "fidelity", "missingness"]
+    CONDITION_COLORS = {
+        "baseline":    "#888888",
+        "fidelity":    WONG["blue"],
+        "missingness": WONG["vermil"],
+    }
+    CONDITION_LABELS = {
+        "baseline":    "Baseline",
+        "fidelity":    "Fidelity-degraded (F1–F5)",
+        "missingness": "Missingness-degraded (M1–M5)",
+    }
+
+    dataset_names = list(all_results.keys())
+    n_ds = len(dataset_names)
+
+    fig, axes = plt.subplots(1, n_ds,
+                             figsize=(3.6 * n_ds + 0.4, 3.6),
+                             layout="constrained")
+    if n_ds == 1:
+        axes = [axes]
+
+    for ax, dname in zip(axes, dataset_names):
+        results     = all_results[dname]
+        target_size = size_per_dataset.get(dname) if size_per_dataset else None
+
+        rows = []
+        for key, entry in results.items():
+            m        = re.match(r"^(.+?)(?:_n(\d+))?$", key)
+            scenario = m.group(1) if m else key
+
+            if size_per_dataset is not None and entry.get("sample_size") != target_size:
+                continue
+
+            if scenario == "baseline":
+                cond = "baseline"
+            elif scenario.startswith("fidelity"):
+                cond = "fidelity"
+            elif scenario.startswith("missingness"):
+                cond = "missingness"
+            else:
+                continue
+
+            for row in entry.get("per_dataset", []):
+                fid  = row.get("fidelity_overall")
+                miss = row.get("missingness_overall")
+                if fid is not None and miss is not None:
+                    rows.append({"fidelity": float(fid), "missingness": float(miss),
+                                 "condition": cond})
+
+        df = pd.DataFrame(rows)
+
+        # Plot condition groups: fidelity and missingness first, baseline on top
+        for cond in ["fidelity", "missingness", "baseline"]:
+            sub = df[df["condition"] == cond]
+            if sub.empty:
+                continue
+            ax.scatter(sub["fidelity"], sub["missingness"],
+                       c=CONDITION_COLORS[cond], alpha=0.35, s=7,
+                       linewidths=0, rasterized=True,
+                       label=CONDITION_LABELS[cond])
+
+        # Diagonal y = x reference line
+        ax.plot([0, 1], [0, 1], color="#bbbbbb", lw=0.9, ls="--", zorder=0)
+
+        # Pearson r annotation (all points pooled)
+        if len(df) > 1:
+            r, _ = stats.pearsonr(df["fidelity"], df["missingness"])
+            ax.text(0.04, 0.96, f"r = {r:.2f}",
+                    transform=ax.transAxes, fontsize=7.5,
+                    va="top", ha="left", color="#333333")
+
+        sz_str = f"  (n={target_size:,})" if target_size is not None else ""
+        ax.set_title(f"{dname}{sz_str}", fontsize=9, fontweight="bold")
+        ax.set_xlabel("Fidelity score")
+        ax.set_ylabel("Missingness score")
+        ax.set_xlim(-0.02, 1.05)
+        ax.set_ylim(-0.02, 1.05)
+        ax.set_xticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax.set_aspect("equal")
+        _despine(ax)
+
+    legend_handles = [
+        mpl.patches.Patch(facecolor=CONDITION_COLORS[c], alpha=0.7,
+                          label=CONDITION_LABELS[c])
+        for c in CONDITION_ORDER
+    ]
+    fig.legend(handles=legend_handles, ncol=len(legend_handles), frameon=False,
+               fontsize=8, loc="upper center",
+               bbox_to_anchor=(0.5, 0), bbox_transform=fig.transFigure)
+
+    suffix = "_selected" if size_per_dataset else ""
+    _save(fig, f"fig_fidelity_vs_missingness{suffix}")
+
+
 def _print_summary(all_results: dict[str, dict]) -> None:
     """Print a per-dataset summary of scenarios and replicate counts."""
     print("\n" + "=" * 60)
@@ -1783,12 +2962,15 @@ if __name__ == "__main__":
 
     print("Generating fig1_selected (Diabetes full, MIMIC n=10,000)...")
     fig1_selected(all_results, {
-        "Diabetes":         None,
+        "PID":         None,
         "MIMIC-IV-ED (CC)": 10000,
     })
 
     print("Generating fig2_sample_sizes...")
     fig_sample_sizes(all_results)
+
+    print("Generating fig_violin_sample_sizes...")
+    fig_violin_sample_sizes(all_results)
 
     print("Generating fig3_std_vs_sample_size...")
     fig_std_vs_sample_size(all_results)
@@ -1805,14 +2987,38 @@ if __name__ == "__main__":
     print("Generating fig_baseline_metric_scores...")
     fig_baseline_metric_scores(all_results)
 
-    print("Generating fig_baseline_metric_scores_selected (Diabetes n=768, MIMIC n=10,000)...")
+    print("Generating fig_baseline_metric_scores_selected (PID full, MIMIC n=10,000)...")
     fig_baseline_metric_scores(all_results, size_per_dataset={
-        "Diabetes":         None,
+        "PID":              None,
+        "MIMIC-IV-ED (CC)": 10000,
+    })
+
+    print("Generating fig_scenario_metric_grid_selected (PID full, MIMIC n=10,000)...")
+    fig_scenario_metric_grid(all_results, size_per_dataset={
+        "PID":              None,
+        "MIMIC-IV-ED (CC)": 10000,
+    })
+
+    print("Generating fig_metric_heatmap_by_size...")
+    fig_metric_heatmap_by_size(all_results)
+
+    print("Generating fig_metric_heatmap_selected (PID full, MIMIC n=10,000)...")
+    fig_metric_heatmap(all_results, size_per_dataset={
+        "PID":              None,
         "MIMIC-IV-ED (CC)": 10000,
     })
 
     print("Generating fig_multivariate_across_scenarios...")
     fig_multivariate_across_scenarios(all_results)
+
+    print("Generating fig_fidelity_vs_missingness (PID full, MIMIC n=10,000)...")
+    fig_fidelity_vs_missingness(all_results, size_per_dataset={
+        "PID":              None,
+        "MIMIC-IV-ED (CC)": 10000,
+    })
+
+    print("Generating fig_incremental_degradation...")
+    fig_incremental_degradation(all_results)
 
     print("Done.")
 

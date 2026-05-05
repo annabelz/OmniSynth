@@ -1,7 +1,7 @@
-# stdg-eval dashboard configuration
+# OmniSynth dashboard configuration
 # -----------------------------------------------------------
 # Launch the dashboard with this config:
-#   stdg-eval dashboard --config configs/example_config.yaml
+#   OmniSynth dashboard --config configs/example_config.yaml
 # or:
 #   streamlit run run_dashboard.py -- --config configs/example_config.yaml
 
@@ -53,12 +53,12 @@ synthetic_datasets:
 #   composite: [0.5, 0.5]                 # [fidelity, missingness]
 
 # Optional: path to precomputed results (JSON).
-# Generate with:  stdg-eval precompute --config configs/example_config.yaml --output precomputed.json
+# Generate with:  OmniSynth precompute --config configs/example_config.yaml --output precomputed.json
 # When present, the dashboard loads these results directly and skips recomputing
 # expensive metrics (bivariate, multivariate).
 # precomputed_results: precomputed.json
 
 # Optional: path to meta-evaluation results (JSON).
-# Generate with:  stdg-eval meta-eval --config configs/example_meta_eval_config.yaml
+# Generate with:  OmniSynth meta-eval --config configs/example_meta_eval_config.yaml
 # When present, populates the Meta-evaluation tab in the dashboard.
 # meta_eval_results: meta_eval/results.json

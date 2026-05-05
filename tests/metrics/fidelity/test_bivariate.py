@@ -18,12 +18,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from stdg_eval.metrics.fidelity.bivariate import (
+from omnisynth.metrics.fidelity.bivariate import (
     ContingencyMatrix,
     PairwiseCorrelationDifference,
     SpearmanCorrelation,
 )
-from stdg_eval.utils.data_utils import ColumnTypes
+from omnisynth.utils.data_utils import ColumnTypes
 
 
 # ===========================================================================
