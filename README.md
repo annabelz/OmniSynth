@@ -381,27 +381,19 @@ The dashboard has five tabs:
 
 ```
 OmniSynth/
+├── pyproject.toml
+├── requirements.txt
 ├── run_dashboard.py
-├── configs/example_config.yaml
+├── configs/
+│   ├── example_config.yaml
+│   └── example_meta_eval_config.yaml
 ├── examples/
 │   ├── example_config.yaml
-│   └── example_workflow.py
-├── tests/
-│   ├── conftest.py
-│   ├── metrics/
-│   │   ├── fidelity/
-│   │   │   ├── test_univariate.py
-│   │   │   ├── test_bivariate.py
-│   │   │   └── test_multivariate.py
-│   │   └── missingness/
-│   │       └── test_measures.py
-│   ├── evaluation/
-│   │   └── test_scoring.py
-│   └── utils/
-│       └── test_data_utils.py
+│   ├── example_workflow.py
+│   └── meta_eval_config.yaml
 └── omnisynth/
     ├── cli.py                        # CLI entry point
-    ├── config.py                     # EvalConfig, FidelityConfig, MissingnessConfig
+    ├── config.py                     # EvalConfig, default weights
     ├── metrics/
     │   ├── base.py                   # BaseMetric, MetricResult
     │   ├── fidelity/
@@ -413,12 +405,13 @@ OmniSynth/
     ├── evaluation/
     │   ├── fidelity.py               # evaluate_fidelity()
     │   ├── missingness.py            # evaluate_missingness()
-    │   └── scoring.py                # compute_*_score()
+    │   └── scoring.py                # compute_*_score(), default + custom weights
     ├── meta_eval/
     │   ├── config.py                 # MetaEvalConfig, load_meta_eval_config()
     │   ├── runner.py                 # run_meta_eval()
     │   └── scenarios/
     │       ├── base.py               # generate_datasets(), TransformFn, quartile masks
+    │       ├── baseline.py           # baseline scenario
     │       ├── fidelity.py           # fidelity_1 – fidelity_5
     │       ├── missingness.py        # missingness_1 – missingness_5
     │       └── composite.py          # composite_f{1-5}_m{1-5} (25 combinations)
