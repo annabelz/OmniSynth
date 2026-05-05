@@ -4,17 +4,6 @@ A modular Python library for evaluating tabular synthetic data, with a focus on 
 
 ---
 
-## Evaluation axes
-
-| Axis | Status |
-|------|--------|
-| **Fidelity** | ✅ Available |
-| **Missingness** | ✅ Available |
-| **Utility** | 🔜 Planned |
-| **Privacy** | 🔜 Planned |
-
----
-
 ## Installation
 
 ```bash
@@ -190,6 +179,25 @@ scenarios:
     n_datasets: 10
   - name: composite_f1_m1
     n_datasets: 10
+
+# Optional: enable/disable individual metrics
+metrics:
+  fidelity:
+    hellinger: true
+    pcd: true
+    auc_roc: true
+    propensity_mse: true
+  missingness:
+    rate: true
+    set_distribution: true
+    missing_auroc: true
+    dependency_structure: true
+
+# Optional: customise scoring weights (equal by default; vectors are auto-normalised)
+weights:
+  fidelity: [1.0, 1.0, 1.0]      # [univariate, bivariate, multivariate]
+  missingness: [1.0, 1.0, 1.0, 1.0]  # [rate, set_distribution, missing_auroc, dependency_structure]
+  composite: [1.0, 1.0]           # [fidelity, missingness]
 ```
 
 Each scenario generates `n_datasets` noisy replicates and reports mean ± std scores across them. When `sample_sizes` is set, each replicate independently draws a fresh random sample of that size and evaluates against it; result keys are suffixed `_n{size}` (e.g. `fidelity_1_n500`) or `_full`.
@@ -239,6 +247,34 @@ metrics:                # optional — all true by default
   dependency_structure: true
 
 precomputed_results: precomputed.json   # optional — skip recomputation in dashboard
+
+weights:                # optional — all groups equal by default
+  # Fidelity group weights [univariate, bivariate, multivariate] — auto-normalised
+  fidelity: [1.0, 1.0, 1.0]
+  # Missingness metric weights [rate, set_distribution, missing_auroc, dependency_structure]
+  missingness: [1.0, 1.0, 1.0, 1.0]
+  # Composite axis weights [fidelity, missingness]
+  composite: [1.0, 1.0]
+```
+
+#### Default weighting scheme
+
+OmniSynth uses a hierarchical equal-weight scheme by default:
+
+- **Fidelity**: the three metric groups (univariate, bivariate, multivariate) contribute equally (1/3 each). Within the univariate group, each present metric (Wasserstein, TVD, Hellinger) contributes equally.
+- **Missingness**: the four metrics (rate, set_distribution, missing_auroc, dependency_structure) contribute equally (1/4 each).
+- **Composite**: fidelity and missingness contribute equally (1/2 each).
+
+All weight vectors are automatically normalised to sum to 1, so only relative magnitudes matter. For example, `fidelity: [1.0, 1.0, 3.0]` gives the multivariate group three times the weight of univariate or bivariate.
+
+Weights can also be customised at runtime via the scoring functions:
+
+```python
+from omnisynth.evaluation.scoring import compute_fidelity_score, compute_missingness_score, compute_composite_score
+
+f_scores = compute_fidelity_score(fid, weights=[1.0, 1.0, 3.0])           # upweight multivariate
+m_scores = compute_missingness_score(miss, weights=[2.0, 1.0, 1.0, 1.0])  # upweight rate
+comp     = compute_composite_score(f_scores, m_scores, weights=[0.6, 0.4]) # fidelity-heavy composite
 ```
 
 ### Precomputing expensive metrics
