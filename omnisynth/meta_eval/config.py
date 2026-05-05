@@ -94,16 +94,10 @@ class MetaEvalConfig:
 
         metrics:
           fidelity:
-            wasserstein: true
-            tvd: true
             hellinger: true
-            spearman: true
-            contingency: true
             pcd: true
             auc_roc: true
             propensity_mse: true
-            crcl_rs: false
-            crcl_sr: false
           missingness:
             rate: true
             set_distribution: true

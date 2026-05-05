@@ -219,11 +219,8 @@ def load_config(path: str | pathlib.Path) -> dict:
         Per-metric enable flags, e.g.::
 
             metrics:
-              wasserstein: false
-              tvd: false
               hellinger: true
-              spearman: true
-              contingency: true
+              pairwise_correlation_difference: true
               auc_roc: true
               propensity_mse: true
               rate: true
@@ -245,8 +242,14 @@ def load_config(path: str | pathlib.Path) -> dict:
           age: numerical
           sex: categorical
         metrics:
-          wasserstein: false
           hellinger: true
+          pairwise_correlation_difference: true
+          auc_roc: true
+          propensity_mse: true
+          rate: true
+          set_distribution: true
+          missing_auroc: true
+          dependency_structure: true
     """
     path = pathlib.Path(path)
     suffix = path.suffix.lower()
