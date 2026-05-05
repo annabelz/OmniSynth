@@ -288,22 +288,22 @@ def eval_config_from_dict(cfg: dict) -> EvalConfig:
         miss_m = raw_metrics
 
     fidelity = FidelityConfig(
-        run_wasserstein=bool(fid_m.get("wasserstein", True)),
-        run_tvd=bool(fid_m.get("tvd", True)),
-        run_hellinger=bool(fid_m.get("hellinger", True)),
-        run_spearman=bool(fid_m.get("spearman", True)),
-        run_contingency=bool(fid_m.get("contingency", True)),
-        run_pcd=bool(fid_m.get("pcd", fid_m.get("pairwise_correlation_difference", True))),
-        run_auc_roc=bool(fid_m.get("auc_roc", True)),
-        run_propensity_mse=bool(fid_m.get("propensity_mse", True)),
-        run_crcl_rs=bool(fid_m.get("crcl_rs", True)),
-        run_crcl_sr=bool(fid_m.get("crcl_sr", True)),
+        run_wasserstein=bool(fid_m.get("wasserstein", False)),
+        run_tvd=bool(fid_m.get("tvd", False)),
+        run_hellinger=bool(fid_m.get("hellinger", False)),
+        run_spearman=bool(fid_m.get("spearman", False)),
+        run_contingency=bool(fid_m.get("contingency", False)),
+        run_pcd=bool(fid_m.get("pcd", fid_m.get("pairwise_correlation_difference", False))),
+        run_auc_roc=bool(fid_m.get("auc_roc", False)),
+        run_propensity_mse=bool(fid_m.get("propensity_mse", False)),
+        run_crcl_rs=bool(fid_m.get("crcl_rs", False)),
+        run_crcl_sr=bool(fid_m.get("crcl_sr", False)),
     )
     missingness = MissingnessConfig(
-        run_rate=bool(miss_m.get("rate", True)),
-        run_set_distribution=bool(miss_m.get("set_distribution", True)),
-        run_missing_auroc=bool(miss_m.get("missing_auroc", True)),
-        run_dependency_structure=bool(miss_m.get("dependency_structure", True)),
+        run_rate=bool(miss_m.get("rate", False)),
+        run_set_distribution=bool(miss_m.get("set_distribution", False)),
+        run_missing_auroc=bool(miss_m.get("missing_auroc", False)),
+        run_dependency_structure=bool(miss_m.get("dependency_structure", False)),
     )
     return EvalConfig(fidelity=fidelity, missingness=missingness)
 

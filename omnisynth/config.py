@@ -55,8 +55,8 @@ class FidelityConfig:
     """Knobs for individual fidelity metrics."""
 
     # Univariate — metric enable flags
-    run_wasserstein: bool = True
-    run_tvd: bool = True
+    run_wasserstein: bool = False
+    run_tvd: bool = False
     run_hellinger: bool = True
 
     # Univariate — metric settings
@@ -64,8 +64,8 @@ class FidelityConfig:
     tvd_normalize: bool = True     # normalise frequency distributions before TVD
 
     # Bivariate — metric enable flags
-    run_spearman: bool = True
-    run_contingency: bool = True
+    run_spearman: bool = False
+    run_contingency: bool = False
     run_pcd: bool = True
 
     # Bivariate — metric settings
@@ -75,8 +75,8 @@ class FidelityConfig:
     # Multivariate — metric enable flags
     run_auc_roc: bool = True
     run_propensity_mse: bool = True
-    run_crcl_rs: bool = True
-    run_crcl_sr: bool = True
+    run_crcl_rs: bool = False
+    run_crcl_sr: bool = False
 
     # Multivariate — metric settings
     auc_roc_n_estimators: int = 100

@@ -36,16 +36,16 @@ def _build_eval_config(metrics: dict) -> EvalConfig:
     """Build an EvalConfig from a ``metrics`` dict (fidelity/missingness sub-dicts)."""
     fid_cfg = metrics.get("fidelity", {})
     fc = FidelityConfig(
-        run_wasserstein=bool(fid_cfg.get("wasserstein", True)),
-        run_tvd=bool(fid_cfg.get("tvd", True)),
-        run_hellinger=bool(fid_cfg.get("hellinger", True)),
-        run_spearman=bool(fid_cfg.get("spearman", True)),
-        run_contingency=bool(fid_cfg.get("contingency", True)),
-        run_pcd=bool(fid_cfg.get("pcd", True)),
-        run_auc_roc=bool(fid_cfg.get("auc_roc", True)),
-        run_propensity_mse=bool(fid_cfg.get("propensity_mse", True)),
-        run_crcl_rs=bool(fid_cfg.get("crcl_rs", True)),
-        run_crcl_sr=bool(fid_cfg.get("crcl_sr", True)),
+        run_wasserstein=bool(fid_cfg.get("wasserstein", False)),
+        run_tvd=bool(fid_cfg.get("tvd", False)),
+        run_hellinger=bool(fid_cfg.get("hellinger", False)),
+        run_spearman=bool(fid_cfg.get("spearman", False)),
+        run_contingency=bool(fid_cfg.get("contingency", False)),
+        run_pcd=bool(fid_cfg.get("pcd", False)),
+        run_auc_roc=bool(fid_cfg.get("auc_roc", False)),
+        run_propensity_mse=bool(fid_cfg.get("propensity_mse", False)),
+        run_crcl_rs=bool(fid_cfg.get("crcl_rs", False)),
+        run_crcl_sr=bool(fid_cfg.get("crcl_sr", False)),
     )
     return EvalConfig(fidelity=fc)
 
@@ -54,9 +54,9 @@ def _fidelity_group_flags(metrics: dict) -> dict:
     """Return run_univariate/bivariate/multivariate kwargs derived from the metrics dict."""
     fid = metrics.get("fidelity", {})
     return {
-        "run_univariate": any(fid.get(k, True) for k in ("wasserstein", "tvd", "hellinger")),
-        "run_bivariate":  any(fid.get(k, True) for k in ("spearman", "contingency", "pcd")),
-        "run_multivariate": any(fid.get(k, True) for k in ("auc_roc", "propensity_mse", "crcl_rs", "crcl_sr")),
+        "run_univariate": any(fid.get(k, False) for k in ("wasserstein", "tvd", "hellinger")),
+        "run_bivariate":  any(fid.get(k, False) for k in ("spearman", "contingency", "pcd")),
+        "run_multivariate": any(fid.get(k, False) for k in ("auc_roc", "propensity_mse", "crcl_rs", "crcl_sr")),
     }
 
 
@@ -64,10 +64,10 @@ def _missingness_flags(metrics: dict) -> dict:
     """Return run_* kwargs for evaluate_missingness derived from the metrics dict."""
     miss = metrics.get("missingness", {})
     return {
-        "run_rate":                 bool(miss.get("rate", True)),
-        "run_set_distribution":     bool(miss.get("set_distribution", True)),
-        "run_missing_auroc":        bool(miss.get("missing_auroc", True)),
-        "run_dependency_structure": bool(miss.get("dependency_structure", True)),
+        "run_rate":                 bool(miss.get("rate", False)),
+        "run_set_distribution":     bool(miss.get("set_distribution", False)),
+        "run_missing_auroc":        bool(miss.get("missing_auroc", False)),
+        "run_dependency_structure": bool(miss.get("dependency_structure", False)),
     }
 
 
@@ -218,13 +218,13 @@ def run_meta_eval(
                         "wasserstein", "tvd", "hellinger",
                         "spearman", "contingency", "pcd",
                         "auc_roc", "propensity_mse", "crcl_rs", "crcl_sr",
-                    ) if bool(_fid.get(m, True))]
+                    ) if bool(_fid.get(m, False))]
                     print(f"  Fidelity   : {', '.join(_fid_names)}")
                 if run_missingness:
                     _miss = _metrics.get("missingness", {})
                     _miss_names = [m for m in (
                         "rate", "set_distribution", "missing_auroc", "dependency_structure",
-                    ) if bool(_miss.get(m, True))]
+                    ) if bool(_miss.get(m, False))]
                     print(f"  Missingness: {', '.join(_miss_names)}")
 
             # ------------------------------------------------------------------

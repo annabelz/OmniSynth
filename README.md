@@ -226,20 +226,14 @@ column_types:           # optional — auto-inferred if omitted
   age: numerical
   sex: categorical
 
-metrics:                # optional — all true by default
-  # Univariate
-  wasserstein: true
-  tvd: true
+metrics:                # optional — omitted metrics default to false
+  # Fidelity — univariate
   hellinger: true
-  # Bivariate
-  spearman: true
-  contingency: true
+  # Fidelity — bivariate
   pairwise_correlation_difference: true
-  # Multivariate
+  # Fidelity — multivariate
   auc_roc: true
   propensity_mse: true
-  crcl_rs: false        # computationally expensive — disable if not needed
-  crcl_sr: false
   # Missingness
   rate: true
   set_distribution: true
@@ -261,7 +255,7 @@ weights:                # optional — all groups equal by default
 
 OmniSynth uses a hierarchical equal-weight scheme by default:
 
-- **Fidelity**: the three metric groups (univariate, bivariate, multivariate) contribute equally (1/3 each). Within the univariate group, each present metric (Wasserstein, TVD, Hellinger) contributes equally.
+- **Fidelity**: the three metric groups (univariate, bivariate, multivariate) contribute equally (1/3 each). Within the multivariate group, AUC-ROC and Propensity MSE contribute equally.
 - **Missingness**: the four metrics (rate, set_distribution, missing_auroc, dependency_structure) contribute equally (1/4 each).
 - **Composite**: fidelity and missingness contribute equally (1/2 each).
 
@@ -295,8 +289,6 @@ Reference the output in your config with `precomputed_results: precomputed.json`
 
 | Metric | Applies to | Score |
 |--------|-----------|-------|
-| Wasserstein Distance | Numerical | `exp(−WD / (IQR_real + ε))` per column, mean across columns |
-| Total Variation Distance | Categorical | `1 − TVD` per column, mean across columns |
 | Hellinger Distance | Numerical + Categorical | `1 − HD` per column, mean across columns |
 
 Hellinger Distance uses Scott's-rule histograms on the combined real + synthetic range for numerical columns, and frequency distributions for categorical columns.
@@ -305,8 +297,6 @@ Hellinger Distance uses Scott's-rule histograms on the combined real + synthetic
 
 | Metric | Applies to | Score |
 |--------|-----------|-------|
-| Spearman Correlation | Num × Num | `1 − mean(abs(ρ_real − ρ_synth))` across pairs |
-| Contingency Matrix TVD | Cat × Cat, Num × Cat | `1 − mean(TVD)` across pairs |
 | Pairwise Correlation Difference (PCD) | All pairs (φk) | `1 − mean(abs(φk_real − φk_synth))` across pairs |
 
 PCD uses the φk (phi-k) correlation coefficient — a mixed-type association measure in [0, 1]. Binning uses Scott's rule on pooled real + synthetic values. A Student's t-test flags whether the mean absolute difference is statistically significant (α = 0.05).
@@ -317,10 +307,6 @@ PCD uses the φk (phi-k) correlation coefficient — a mixed-type association me
 |--------|-------|
 | AUC-ROC | `1 − 2 × abs(AUROC − 0.5)` — random forest discriminator trained via k-fold CV (default 5); AUROC = 0.5 → score = 1 |
 | Propensity MSE | `1 − 4 × pMSE` — propensity score MSE normalised by worst case (0.25 for balanced labels); pMSE = 0 → score = 1 |
-| CrCl-RS | `max(0, 1 − abs(mean_ratio − 1))` — train on real, test on synth; ratio = perf_synth / perf_real_held |
-| CrCl-SR | same formula — train on synth, test on real; ratio = perf_real / perf_synth_held |
-
-CrCl iterates over each variable as a prediction target using a decision tree (accuracy for categorical, R² for numerical). Complete case analysis is used by default (no imputation). A ratio of 1.0 per variable indicates perfect transfer. Reference: Goncalves et al. (2020) *BMC Med Res Methodol*.
 
 ### Missingness
 

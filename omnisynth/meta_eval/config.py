@@ -110,8 +110,7 @@ class MetaEvalConfig:
             missing_auroc: true
             dependency_structure: true
 
-    Omitted keys default to ``True``.  Omitting the ``metrics`` block entirely
-    runs all metrics.
+    Omitted keys default to ``False``.  Explicitly set a metric to ``true`` to enable it.
     """
     verbose: str = "some"
     """Verbosity level: ``"none"`` | ``"some"`` | ``"all"``.
