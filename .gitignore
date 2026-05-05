@@ -52,3 +52,5 @@ misc_scripts/
 # Meta-evaluation generated datasets and results
 examples/meta_eval/
 
+figures/
+tests/

@@ -420,13 +420,3 @@ class MyMetric(BaseMetric):
         return MetricResult(metric_name=self.name, score=score, details={...})
 ```
 
----
-
-## TODO
-
-- [ ] Expand test coverage to include new metrics (CrCl-RS/SR, PCD, Hellinger, missingness metrics)
-- [ ] Utility metrics (train-on-synthetic / test-on-real task performance)
-- [ ] Privacy metrics (membership inference, nearest-neighbour distance ratios)
-- [ ] Composite score weighting scheme once utility and privacy axes are implemented
-- [ ] Per-dataset PDF / HTML report export
-- [ ] Bootstrap confidence intervals for metric scores
