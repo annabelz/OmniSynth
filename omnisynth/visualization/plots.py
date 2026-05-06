@@ -489,6 +489,7 @@ def plot_missingness_upset(
     title: str = "Missingness patterns",
     top_n: int = 15,
     bar_color: str = REAL_COLOR,
+    score: float | None = None,
 ) -> go.Figure:
     """
     UpSet-style plot for missingness patterns.
@@ -621,8 +622,9 @@ def plot_missingness_upset(
     bar_height = max(200, 30 * min(top_n, n_patterns) + 60)
     dot_height = max(160, 28 * n_cols + 40)
 
+    full_title = f"{title} — Set Dist score: {score:.3f}" if score is not None else title
     fig.update_layout(
-        title=title,
+        title=full_title,
         height=bar_height + dot_height,
         margin=dict(l=100, r=20, t=50, b=40),
         plot_bgcolor="white",

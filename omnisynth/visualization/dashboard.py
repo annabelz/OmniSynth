@@ -789,8 +789,16 @@ def _tab_individual():
                     synth[shared_cols],
                     title=selected,
                     bar_color=P.SYNTH_COLORS[0],
+                    score=set_res.score if set_res else None,
                 )
                 st.plotly_chart(fig, use_container_width=True)
+
+            if set_res:
+                st.caption(
+                    f"Pattern distribution TVD: {set_res.details.get('tvd', 0):.4f}  |  "
+                    f"Unique patterns (real): {set_res.details.get('n_unique_real_patterns', 'n/a')}  |  "
+                    f"Unique patterns ({selected}): {set_res.details.get('n_unique_synth_patterns', 'n/a')}"
+                )
 
             if dep_res and "columns" in dep_res.details:
                 dep_cols = dep_res.details["columns"]
@@ -824,12 +832,6 @@ def _tab_individual():
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-            if set_res:
-                st.caption(
-                    f"Pattern distribution TVD: {set_res.details.get('tvd', 0):.4f}  |  "
-                    f"Unique patterns (real): {set_res.details.get('n_unique_real_patterns', 'n/a')}  |  "
-                    f"Unique patterns ({selected}): {set_res.details.get('n_unique_synth_patterns', 'n/a')}"
-                )
 
 
 def go_bar_folds(fold_aurocs: list) -> "go.Figure":
@@ -2079,21 +2081,11 @@ def run_dashboard():
             "👈 **Get started**: upload your real dataset and one or more synthetic "
             "datasets in the sidebar, then click **▶ Run evaluation**."
         )
-        st.markdown("""
-### Evaluation axes
-
-| Axis | Status | Metrics |
-|------|--------|---------|
-| **Fidelity** | ✅ Available | Wasserstein Distance, TVD, Spearman Correlation, Contingency Matrix, AUC-ROC, Propensity MSE |
-| **Missingness** | ✅ Available | Missingness Rate, Pattern Distribution, Classifier AUROC, Dependency Structure |
-| **Utility** | 🔜 TODO | Downstream task performance |
-| **Privacy** | 🔜 TODO | Disclosure risk, membership inference |
-        """)
         return
 
     _weight_controls()
 
-    tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🗂 Dataset Description", "📊 Individual Report", "🏆 Benchmarking Report", "📋 Score Summary", "🔗 Metric Correlations", "🥇 Ranking", "🧪 Meta-evaluation"])
+    tab0, tab1, tab2, tab3, tab4 = st.tabs(["🗂 Dataset Description", "📊 Individual Report", "🏆 Benchmarking Report", "📋 Score Summary", "🧪 Meta-evaluation"])
     with tab0:
         _tab_dataset_description()
     with tab1:
@@ -2103,10 +2095,6 @@ def run_dashboard():
     with tab3:
         _tab_score_summary()
     with tab4:
-        _tab_metric_correlation()
-    with tab5:
-        _tab_ranking()
-    with tab6:
         _tab_meta_eval()
 
 
